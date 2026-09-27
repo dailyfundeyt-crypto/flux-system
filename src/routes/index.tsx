@@ -696,6 +696,25 @@ function EntryList({ title, entries, icon, status = false }: { title: string; en
 const eur = (value: number) =>
   value.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 
+type RevenueRow =
+  | { kind: "purchase"; id: number; label: string; amount: number }
+  | { kind: "shipping"; id: number; label: string; amount: number }
+  | { kind: "revenue"; id: number; label: string; amount: number }
+  | {
+      kind: "batch";
+      id: number;
+      label: string;
+      purchaseIds: number[];
+      revenueIds: number[];
+    };
+
+const revenueBadgeStyles: Record<RevenueRow["kind"], { label: string; className: string }> = {
+  purchase: { label: "Ankauf", className: "bg-rose-50 text-rose-700" },
+  shipping: { label: "Versand", className: "bg-amber-50 text-amber-700" },
+  revenue: { label: "Umsatz", className: "bg-emerald-50 text-emerald-700" },
+  batch: { label: "Einkauf-Batch", className: "bg-indigo-50 text-indigo-700" },
+};
+
 function RevenueWorkspace({
   purchaseLines,
   onPurchaseLinesChange,
@@ -729,22 +748,61 @@ function RevenueWorkspace({
   const profit = revenueTotal - cost;
   const margin = revenueTotal > 0 ? (profit / revenueTotal) * 100 : 0;
   const pendingSalesCount = sales.length;
-  const unassignedRevenue = revenue.filter((line) => !batches.some((batch) => batch.revenueIds.includes(line.id)));
-  const unassignedPurchases = purchaseLines.filter((line) => !batches.some((batch) => batch.purchaseIds.includes(line.id)));
-  const unassignedRevenueTotal = unassignedRevenue.reduce((sum, line) => sum + line.amount, 0);
-  const unassignedPurchaseTotal = unassignedPurchases.reduce((sum, line) => sum + line.amount, 0);
-  const assignedRevenueTotal = revenueTotal - unassignedRevenueTotal;
-  const assignedPurchaseTotal = purchaseTotal - unassignedPurchaseTotal;
 
-  const updateLine = <T extends MoneyLine>(
-    rows: T[],
-    setter: (next: T[]) => void,
-    id: number,
-    patch: Partial<T>,
-  ) => setter(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  const unifiedRows: RevenueRow[] = [
+    ...purchaseLines.map<RevenueRow>((line) => ({ kind: "purchase", id: line.id, label: line.label, amount: line.amount })),
+    ...shippingLines.map<RevenueRow>((line) => ({ kind: "shipping", id: line.id, label: line.label, amount: line.amount })),
+    ...revenue.map<RevenueRow>((line) => ({ kind: "revenue", id: line.id, label: line.store, amount: line.amount })),
+    ...batches.map<RevenueRow>((batch) => ({
+      kind: "batch",
+      id: batch.id,
+      label: batch.label,
+      purchaseIds: batch.purchaseIds,
+      revenueIds: batch.revenueIds,
+    })),
+  ];
 
-  const removeLine = <T extends { id: number }>(rows: T[], setter: (next: T[]) => void, id: number) =>
-    setter(rows.filter((row) => row.id !== id));
+  const updateRow = (row: RevenueRow, patch: Partial<RevenueRow>) => {
+    switch (row.kind) {
+      case "purchase":
+        onPurchaseLinesChange(
+          purchaseLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<MoneyLine>) } : line)),
+        );
+        return;
+      case "shipping":
+        onShippingLinesChange(
+          shippingLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<MoneyLine>) } : line)),
+        );
+        return;
+      case "revenue":
+        onRevenueChange(
+          revenue.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<RevenueLine>) } : line)),
+        );
+        return;
+      case "batch":
+        onBatchesChange(
+          batches.map((batch) => (batch.id === row.id ? { ...batch, ...(patch as Partial<PurchaseBatch>) } : batch)),
+        );
+        return;
+    }
+  };
+
+  const removeRow = (row: RevenueRow) => {
+    switch (row.kind) {
+      case "purchase":
+        onPurchaseLinesChange(purchaseLines.filter((line) => line.id !== row.id));
+        return;
+      case "shipping":
+        onShippingLinesChange(shippingLines.filter((line) => line.id !== row.id));
+        return;
+      case "revenue":
+        onRevenueChange(revenue.filter((line) => line.id !== row.id));
+        return;
+      case "batch":
+        onBatchesChange(batches.filter((batch) => batch.id !== row.id));
+        return;
+    }
+  };
 
   const addPurchaseLine = () => {
     const id = nextPurchaseId.current++;
@@ -763,143 +821,117 @@ function RevenueWorkspace({
     onBatchesChange([...batches, { id, label: `Einkauf ${batches.length + 1}`, purchaseIds: [], revenueIds: [] }]);
   };
 
-  const updateBatch = (id: number, patch: Partial<PurchaseBatch>) =>
-    onBatchesChange(batches.map((batch) => (batch.id === id ? { ...batch, ...patch } : batch)));
-
   const lookupPurchase = (id: number) => purchaseLines.find((line) => line.id === id);
   const lookupRevenue = (id: number) => revenue.find((line) => line.id === id);
 
   return (
     <div className="mt-8 space-y-6">
-      <RevenueBreakdown
+      <RevenueSummaryStrip
         revenue={revenueTotal}
-        cost={cost}
         purchaseTotal={purchaseTotal}
         shippingTotal={shippingTotal}
         profit={profit}
         margin={margin}
         pendingSales={pendingSalesCount}
-        assignedRevenueTotal={assignedRevenueTotal}
-        unassignedRevenueTotal={unassignedRevenueTotal}
-        assignedPurchaseTotal={assignedPurchaseTotal}
-        unassignedPurchaseTotal={unassignedPurchaseTotal}
-      />
-
-      <RevenueTableCard
-        title="Alle Ankäufe"
-        rows={purchaseLines}
-        onChange={onPurchaseLinesChange}
-        onAdd={addPurchaseLine}
-        addLabel="Neuer Ankauf"
-        sumLabel="Summe Ankäufe"
-        total={purchaseTotal}
-        update={(id, patch) => updateLine(purchaseLines, onPurchaseLinesChange, id, patch as Partial<MoneyLine>)}
-        remove={(id) => removeLine(purchaseLines, onPurchaseLinesChange, id)}
-        getLabel={(row) => (row as MoneyLine).label}
-        setLabel={(_row, value) => ({ label: value } as Partial<MoneyLine>)}
-      />
-
-      <RevenueTableCard
-        title="Versandkosten"
-        rows={shippingLines}
-        onChange={onShippingLinesChange}
-        onAdd={addShippingLine}
-        addLabel="Neue Versandposition"
-        sumLabel="Summe Versand"
-        total={shippingTotal}
-        update={(id, patch) => updateLine(shippingLines, onShippingLinesChange, id, patch as Partial<MoneyLine>)}
-        remove={(id) => removeLine(shippingLines, onShippingLinesChange, id)}
-        getLabel={(row) => (row as MoneyLine).label}
-        setLabel={(_row, value) => ({ label: value } as Partial<MoneyLine>)}
-      />
-
-      <RevenueTableCard
-        title="Umsätze"
-        rows={revenue}
-        onChange={onRevenueChange as (rows: RevenueLine[]) => void}
-        onAdd={addRevenueLine}
-        addLabel="Neuer Umsatz"
-        sumLabel="Summe Umsätze"
-        total={revenueTotal}
-        update={(id, patch) => onRevenueChange(revenue.map((row) => (row.id === id ? { ...row, ...(patch as Partial<RevenueLine>) } : row)))}
-        remove={(id) => removeLine(revenue, onRevenueChange as (rows: RevenueLine[]) => void, id)}
-        getLabel={(row) => (row as RevenueLine).store}
-        setLabel={(_row, value) => ({ store: value } as Partial<RevenueLine>)}
       />
 
       <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-3 border-b border-neutral-200 px-4 py-3">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-neutral-900">Einkauf-Rentabilität</h3>
+            <h3 className="text-sm font-semibold text-neutral-900">Umsatz-Tabelle</h3>
             <p className="mt-0.5 text-xs text-neutral-500">
-              Ordne Ankäufe und Umsätze zu, um zu sehen, wie viel vom eingesetzten Geld bereits zurückgeflossen ist.
+              Eine flache Tabelle für alle Positionen: Ankäufe, Versand, Umsätze und Einkauf-Batches. Wie auf der Lieferung-Seite.
             </p>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <AddRowButton onClick={addPurchaseLine} label="Ankauf" />
+            <AddRowButton onClick={addShippingLine} label="Versand" />
+            <AddRowButton onClick={addRevenueLine} label="Umsatz" />
+            <AddRowButton onClick={addBatch} label="Einkauf-Batch" />
           </div>
         </div>
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              <th className="px-4 py-3 w-32">Einkauf</th>
-              <th className="px-4 py-3">Zugeordnete Ankäufe</th>
-              <th className="px-4 py-3">Zugeordnete Umsätze</th>
-              <th className="px-4 py-3 w-32 text-right">Einsatz</th>
-              <th className="px-4 py-3 w-36 text-right">Davon zurück</th>
+              <th className="px-4 py-3 w-32">Kategorie</th>
+              <th className="px-4 py-3">Bezeichnung</th>
+              <th className="px-4 py-3">Zuordnung</th>
+              <th className="px-4 py-3 w-36 text-right">Betrag</th>
               <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
             </tr>
           </thead>
           <tbody>
-            {batches.map((batch) => {
-              const batchCost = batch.purchaseIds.reduce((sum, id) => sum + (lookupPurchase(id)?.amount ?? 0), 0);
-              const batchReturn = batch.revenueIds.reduce((sum, id) => sum + (lookupRevenue(id)?.amount ?? 0), 0);
-              const ratio = batchCost > 0 ? batchReturn / batchCost : 0;
-              const remaining = batchReturn - batchCost;
+            {unifiedRows.map((row) => {
+              const badge = revenueBadgeStyles[row.kind];
+              const isBatch = row.kind === "batch";
+              const batchCost = isBatch
+                ? row.purchaseIds.reduce((sum, id) => sum + (lookupPurchase(id)?.amount ?? 0), 0)
+                : 0;
+              const batchReturn = isBatch
+                ? row.revenueIds.reduce((sum, id) => sum + (lookupRevenue(id)?.amount ?? 0), 0)
+                : 0;
+              const ratio = isBatch && batchCost > 0 ? batchReturn / batchCost : 0;
               return (
-                <tr key={batch.id} className="border-b border-neutral-100 align-top transition-colors last:border-0 hover:bg-neutral-50">
-                  <td className="px-4 py-2.5">
+                <tr key={`${row.kind}-${row.id}`} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
+                  <td className="px-4 py-3">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${badge.className}`}>
+                      {badge.label}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
                     <input
-                      value={batch.label}
-                      onChange={(event) => updateBatch(batch.id, { label: event.target.value })}
-                      aria-label="Einkauf-Name"
-                      className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:border-neutral-300 focus:bg-white"
+                      value={row.label}
+                      onChange={(event) => updateRow(row, { label: event.target.value } as Partial<RevenueRow>)}
+                      placeholder={
+                        row.kind === "purchase" ? "Lieferant oder Position" :
+                        row.kind === "shipping" ? "Carrier oder Sendung" :
+                        row.kind === "revenue" ? "Store oder Kunde" :
+                        "Einkauf-Name"
+                      }
+                      aria-label="Bezeichnung"
+                      className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white ${row.kind === "batch" ? "font-semibold" : ""}`}
                     />
                   </td>
-                  <td className="px-4 py-2.5">
-                    <BatchSelector
-                      options={purchaseLines}
-                      selected={batch.purchaseIds}
-                      placeholder="Ankauf hinzufügen"
-                      onChange={(next) => updateBatch(batch.id, { purchaseIds: next })}
-                      emptyLabel="Keine Ankäufe vorhanden"
-                      getLabel={(option) => option.label}
-                    />
+                  <td className="px-4 py-3">
+                    {row.kind === "batch" ? (
+                      <BatchAssigner
+                        batch={row}
+                        purchaseLines={purchaseLines}
+                        revenue={revenue}
+                        onChange={(patch) => updateRow(row, patch)}
+                      />
+                    ) : (
+                      <span className="text-xs text-neutral-400">—</span>
+                    )}
                   </td>
-                  <td className="px-4 py-2.5">
-                    <BatchSelector
-                      options={revenue}
-                      selected={batch.revenueIds}
-                      placeholder="Umsatz hinzufügen"
-                      onChange={(next) => updateBatch(batch.id, { revenueIds: next })}
-                      emptyLabel="Keine Umsätze vorhanden"
-                      getLabel={(option) => option.store}
-                    />
+                  <td className="px-4 py-3 text-right">
+                    {row.kind === "batch" ? (
+                      <div className="flex flex-col items-end gap-0.5">
+                        <span className="text-sm font-semibold tabular-nums">{eur(batchCost)}</span>
+                        <span
+                          className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ratio >= 1 ? "bg-emerald-50 text-emerald-700" : ratio >= 0.5 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
+                        >
+                          {eur(batchReturn)} · {(ratio * 100).toFixed(0)} % refinanziert
+                        </span>
+                      </div>
+                    ) : (
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={row.amount}
+                        onChange={(event) => updateRow(row, { amount: Number(event.target.value) || 0 } as Partial<RevenueRow>)}
+                        aria-label="Betrag"
+                        className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
+                      />
+                    )}
                   </td>
-                  <td className="px-4 py-2.5 text-right text-sm font-semibold tabular-nums">{eur(batchCost)}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <div className="flex flex-col items-end gap-1">
-                      <span className={`text-sm font-semibold tabular-nums ${remaining >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{eur(batchReturn)}</span>
-                      <span
-                        className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ratio >= 1 ? "bg-emerald-50 text-emerald-700" : ratio >= 0.5 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
-                      >
-                        {(ratio * 100).toFixed(0)} % refinanziert
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
+                  <td className="px-4 py-3 text-right">
                     <button
                       type="button"
-                      onClick={() => onBatchesChange(batches.filter((row) => row.id !== batch.id))}
+                      onClick={() => removeRow(row)}
                       className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                      aria-label="Einkauf-Batch entfernen"
+                      aria-label="Zeile entfernen"
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
@@ -907,28 +939,41 @@ function RevenueWorkspace({
                 </tr>
               );
             })}
-            {batches.length === 0 && (
+            {unifiedRows.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-sm text-neutral-400">Noch keine Einkäufe zusammengefasst.</td>
-              </tr>
-            )}
-            {batches.length > 0 && (
-              <tr className="border-t border-neutral-200 bg-neutral-50">
-                <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500" colSpan={3}>Zugeordnet gesamt</td>
-                <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(assignedPurchaseTotal)}</td>
-                <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums text-emerald-700">{eur(assignedRevenueTotal)}</td>
-                <td />
+                <td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-400">
+                  Noch keine Positionen erfasst. Lege oben einen ersten Ankauf, Versand oder Umsatz an.
+                </td>
               </tr>
             )}
           </tbody>
+          <tfoot>
+            <tr className="border-t border-neutral-200 bg-neutral-50">
+              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500" colSpan={3}>Σ Gesamt-Tabelle</td>
+              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(revenueTotal - cost)}</td>
+              <td />
+            </tr>
+            <tr className="border-t border-neutral-100 bg-neutral-50/60">
+              <td className="px-4 py-2 text-xs text-neutral-500" colSpan={2}>
+                <div className="flex flex-wrap gap-4">
+                  <span>Σ Ankäufe: <strong className="font-semibold tabular-nums text-neutral-900">{eur(purchaseTotal)}</strong></span>
+                  <span>Σ Versand: <strong className="font-semibold tabular-nums text-neutral-900">{eur(shippingTotal)}</strong></span>
+                  <span>Σ Umsätze: <strong className="font-semibold tabular-nums text-neutral-900">{eur(revenueTotal)}</strong></span>
+                </div>
+              </td>
+              <td className="px-4 py-2 text-right text-xs text-neutral-500">Kosten</td>
+              <td className="px-4 py-2 text-right text-sm font-semibold tabular-nums text-neutral-900">− {eur(cost)}</td>
+              <td />
+            </tr>
+            <tr className="border-t border-neutral-200 bg-white">
+              <td className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500" colSpan={3}>
+                Gesamt-Verkauf (Umsätze − Ankäufe − Versand)
+              </td>
+              <td className={`px-4 py-3 text-right text-base font-bold tabular-nums ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{eur(profit)}</td>
+              <td />
+            </tr>
+          </tfoot>
         </table>
-        <button
-          type="button"
-          onClick={addBatch}
-          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
-        >
-          <Plus className="h-4 w-4" /> Neuer Einkauf-Batch
-        </button>
       </div>
 
       {sales.length > 0 && (
@@ -958,10 +1003,10 @@ function RevenueWorkspace({
                 const amountNumber = Number(entry.amount.replace(/[^\d,]/g, "").replace(",", "."));
                 return (
                   <tr key={`${entry.name}-${index}`} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
-                    <td className="px-4 py-2.5 text-sm font-medium text-neutral-800">{entry.name}</td>
-                    <td className="px-4 py-2.5 text-sm text-neutral-500">{entry.detail}</td>
-                    <td className="px-4 py-2.5 text-right text-sm font-semibold tabular-nums">{entry.amount}</td>
-                    <td className="px-4 py-2.5 text-right">
+                    <td className="px-4 py-3 text-sm font-medium text-neutral-800">{entry.name}</td>
+                    <td className="px-4 py-3 text-sm text-neutral-500">{entry.detail}</td>
+                    <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">{entry.amount}</td>
+                    <td className="px-4 py-3 text-right">
                       <button
                         type="button"
                         onClick={() => {
@@ -986,117 +1031,123 @@ function RevenueWorkspace({
   );
 }
 
-function RevenueTableCard<T extends { id: number; amount: number }>({
-  title,
-  rows,
-  total,
-  sumLabel,
-  addLabel,
-  onAdd,
-  onChange: _onChange,
-  update,
-  remove,
-  getLabel,
-  setLabel,
-}: {
-  title: string;
-  rows: T[];
-  total: number;
-  sumLabel: string;
-  addLabel: string;
-  onAdd: () => void;
-  onChange: (rows: T[]) => void;
-  update: (id: number, patch: Partial<T>) => void;
-  remove: (id: number) => void;
-  getLabel: (row: T) => string;
-  setLabel: (row: T, value: string) => Partial<T>;
-}) {
+function AddRowButton({ onClick, label }: { onClick: () => void; label: string }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-        <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
-      </div>
-      <table className="w-full text-left text-sm">
-        <tbody>
-          {rows.map((row) => (
-            <tr
-              key={row.id}
-              className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50"
+    <button
+      type="button"
+      onClick={onClick}
+      className="inline-flex items-center gap-1 rounded-md border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-600 transition-colors hover:border-neutral-300 hover:bg-neutral-50 hover:text-neutral-900"
+    >
+      <Plus className="h-3 w-3" /> {label}
+    </button>
+  );
+}
+
+function BatchAssigner({
+  batch,
+  purchaseLines,
+  revenue,
+  onChange,
+}: {
+  batch: Extract<RevenueRow, { kind: "batch" }>;
+  purchaseLines: MoneyLine[];
+  revenue: RevenueLine[];
+  onChange: (patch: Partial<RevenueRow>) => void;
+}) {
+  const purchaseOptions = purchaseLines.filter((line) => line.id !== batch.id);
+  const revenueOptions = revenue.filter((line) => line.id !== batch.id);
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">A</span>
+        {batch.purchaseIds.length === 0 && <span className="text-xs text-neutral-400">keine Ankäufe</span>}
+        {batch.purchaseIds.map((id) => {
+          const line = purchaseOptions.find((option) => option.id === id);
+          if (!line) return null;
+          return (
+            <button
+              key={`p-${id}`}
+              type="button"
+              onClick={() => onChange({ purchaseIds: batch.purchaseIds.filter((current) => current !== id) } as Partial<RevenueRow>)}
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-900 bg-neutral-900 px-2 py-0.5 text-[11px] text-white"
+              title="Ankauf entfernen"
             >
-              <td className="px-4 py-2.5">
-                <input
-                  value={getLabel(row)}
-                  onChange={(event) => update(row.id, setLabel(row, event.target.value) as Partial<T>)}
-                  placeholder={title.includes("Versand") ? "Carrier oder Sendung" : title.includes("Umsatz") ? "Store oder Kunde" : "Lieferant oder Position"}
-                  aria-label={`${title}-Bezeichnung`}
-                  className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
-                />
-              </td>
-              <td className="px-4 py-2.5 w-40">
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={row.amount}
-                  onChange={(event) => update(row.id, { amount: Number(event.target.value) || 0 } as Partial<T>)}
-                  aria-label={`${title}-Betrag`}
-                  className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
-                />
-              </td>
-              <td className="px-4 py-2.5 w-16 text-right">
-                <button
-                  type="button"
-                  onClick={() => remove(row.id)}
-                  className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                  aria-label={`${title}-Zeile entfernen`}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </td>
-            </tr>
+              {line.label || `Ankauf ${id}`} <X className="h-3 w-3" />
+            </button>
+          );
+        })}
+        <select
+          value=""
+          onChange={(event) => {
+            const id = Number(event.target.value);
+            if (id && !batch.purchaseIds.includes(id)) {
+              onChange({ purchaseIds: [...batch.purchaseIds, id] } as Partial<RevenueRow>);
+            }
+            event.target.value = "";
+          }}
+          className="rounded-full border border-dashed border-neutral-300 bg-white px-1.5 py-0.5 text-[11px] text-neutral-500 outline-none focus:border-neutral-400"
+          aria-label="Ankauf zuordnen"
+        >
+          <option value="">+ Ankauf</option>
+          {purchaseOptions.filter((option) => !batch.purchaseIds.includes(option.id)).map((option) => (
+            <option key={option.id} value={option.id}>{option.label || `Ankauf ${option.id}`}</option>
           ))}
-          <tr className="border-t border-neutral-200 bg-neutral-50">
-            <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">{sumLabel}</td>
-            <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(total)}</td>
-            <td />
-          </tr>
-        </tbody>
-      </table>
-      <button
-        type="button"
-        onClick={onAdd}
-        className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
-      >
-        <Plus className="h-4 w-4" /> {addLabel}
-      </button>
+        </select>
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-400">U</span>
+        {batch.revenueIds.length === 0 && <span className="text-xs text-neutral-400">keine Umsätze</span>}
+        {batch.revenueIds.map((id) => {
+          const line = revenueOptions.find((option) => option.id === id);
+          if (!line) return null;
+          return (
+            <button
+              key={`r-${id}`}
+              type="button"
+              onClick={() => onChange({ revenueIds: batch.revenueIds.filter((current) => current !== id) } as Partial<RevenueRow>)}
+              className="inline-flex items-center gap-1 rounded-full border border-neutral-900 bg-neutral-900 px-2 py-0.5 text-[11px] text-white"
+              title="Umsatz entfernen"
+            >
+              {line.store || `Umsatz ${id}`} <X className="h-3 w-3" />
+            </button>
+          );
+        })}
+        <select
+          value=""
+          onChange={(event) => {
+            const id = Number(event.target.value);
+            if (id && !batch.revenueIds.includes(id)) {
+              onChange({ revenueIds: [...batch.revenueIds, id] } as Partial<RevenueRow>);
+            }
+            event.target.value = "";
+          }}
+          className="rounded-full border border-dashed border-neutral-300 bg-white px-1.5 py-0.5 text-[11px] text-neutral-500 outline-none focus:border-neutral-400"
+          aria-label="Umsatz zuordnen"
+        >
+          <option value="">+ Umsatz</option>
+          {revenueOptions.filter((option) => !batch.revenueIds.includes(option.id)).map((option) => (
+            <option key={option.id} value={option.id}>{option.store || `Umsatz ${option.id}`}</option>
+          ))}
+        </select>
+      </div>
     </div>
   );
 }
 
-function RevenueBreakdown({
+function RevenueSummaryStrip({
   revenue,
   purchaseTotal,
   shippingTotal,
-  cost,
   profit,
   margin,
   pendingSales,
-  assignedRevenueTotal,
-  unassignedRevenueTotal,
-  assignedPurchaseTotal,
-  unassignedPurchaseTotal,
 }: {
   revenue: number;
   purchaseTotal: number;
   shippingTotal: number;
-  cost: number;
   profit: number;
   margin: number;
   pendingSales: number;
-  assignedRevenueTotal: number;
-  unassignedRevenueTotal: number;
-  assignedPurchaseTotal: number;
-  unassignedPurchaseTotal: number;
 }) {
   const isPositive = profit >= 0;
   return (
@@ -1121,9 +1172,9 @@ function RevenueBreakdown({
       </div>
       <table className="w-full text-left text-sm">
         <tbody>
-          <BreakdownRow label="Summe Umsätze (Brutto)" value={revenue} accent="positive" />
-          <BreakdownRow label="− Summe Ankäufe" value={-purchaseTotal} accent="negative" />
-          <BreakdownRow label="− Summe Versand" value={-shippingTotal} accent="negative" />
+          <BreakdownRow label="Σ Umsätze (Brutto)" value={revenue} accent="positive" />
+          <BreakdownRow label="− Σ Ankäufe" value={-purchaseTotal} accent="negative" />
+          <BreakdownRow label="− Σ Versand" value={-shippingTotal} accent="negative" />
           <tr className="border-t border-neutral-200 bg-neutral-50">
             <td className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">= Gesamt-Verkauf (nach Kosten)</td>
             <td className={`px-5 py-3 text-right text-base font-bold tabular-nums ${isPositive ? "text-emerald-700" : "text-rose-700"}`}>
@@ -1132,15 +1183,6 @@ function RevenueBreakdown({
           </tr>
         </tbody>
       </table>
-      <div className="grid grid-cols-1 gap-px border-t border-neutral-200 bg-neutral-200 sm:grid-cols-2">
-        <CoverageCell label="Zugeordnete Umsätze" value={assignedRevenueTotal} ratio={revenue > 0 ? assignedRevenueTotal / revenue : 0} />
-        <CoverageCell label="Zugeordnete Ankäufe" value={assignedPurchaseTotal} ratio={purchaseTotal > 0 ? assignedPurchaseTotal / purchaseTotal : 0} />
-      </div>
-      {(unassignedRevenueTotal > 0 || unassignedPurchaseTotal > 0) && (
-        <p className="border-t border-neutral-100 bg-white px-5 py-3 text-xs text-neutral-500">
-          Hinweis: <strong className="font-semibold tabular-nums">{eur(unassignedRevenueTotal)}</strong> Umsätze und <strong className="font-semibold tabular-nums">{eur(unassignedPurchaseTotal)}</strong> Ankäufe sind noch keinem Einkauf-Batch zugeordnet.
-        </p>
-      )}
     </div>
   );
 }
@@ -1153,75 +1195,6 @@ function BreakdownRow({ label, value, accent }: { label: string; value: number; 
         {value === 0 ? "0,00 €" : `${value < 0 ? "−" : ""}${eur(Math.abs(value))}`}
       </td>
     </tr>
-  );
-}
-
-function CoverageCell({ label, value, ratio, accent = "neutral" }: { label: string; value: number; ratio: number; accent?: "neutral" | "positive" | "negative" }) {
-  const pct = Math.round(Math.min(Math.max(ratio, 0), 1) * 100);
-  const valueColor = accent === "positive" ? "text-emerald-700" : accent === "negative" ? "text-rose-700" : "text-neutral-900";
-  return (
-    <div className="bg-white px-5 py-3">
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">{label}</span>
-        <span className={`text-sm font-bold tabular-nums ${valueColor}`}>{eur(value)}</span>
-      </div>
-      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
-        <div className="h-full rounded-full bg-neutral-900" style={{ width: `${pct}%` }} />
-      </div>
-      <p className="mt-1 text-[11px] text-neutral-500">{pct} % zugeordnet</p>
-    </div>
-  );
-}
-
-function BatchSelector<T extends { id: number }>({
-  options,
-  selected,
-  placeholder,
-  onChange,
-  emptyLabel,
-  getLabel,
-}: {
-  options: T[];
-  selected: number[];
-  placeholder: string;
-  onChange: (next: number[]) => void;
-  emptyLabel: string;
-  getLabel: (option: T) => string;
-}) {
-  const labelOf = (option: T) => getLabel(option) || `Position ${option.id}`;
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {options.length === 0 && <span className="text-xs text-neutral-400">{emptyLabel}</span>}
-      {options.map((option) => {
-        const active = selected.includes(option.id);
-        return (
-          <button
-            key={option.id}
-            type="button"
-            onClick={() => onChange(active ? selected.filter((id) => id !== option.id) : [...selected, option.id])}
-            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${active ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100"}`}
-            aria-pressed={active}
-          >
-            {labelOf(option)}
-          </button>
-        );
-      })}
-      <select
-        value=""
-        onChange={(event) => {
-          const id = Number(event.target.value);
-          if (id && !selected.includes(id)) onChange([...selected, id]);
-          event.target.value = "";
-        }}
-        className="rounded-full border border-dashed border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-500 outline-none focus:border-neutral-400"
-        aria-label={placeholder}
-      >
-        <option value="">{placeholder}</option>
-        {options.filter((option) => !selected.includes(option.id)).map((option) => (
-          <option key={option.id} value={option.id}>{labelOf(option)}</option>
-        ))}
-      </select>
-    </div>
   );
 }
 
