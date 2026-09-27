@@ -4,7 +4,6 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Box,
-  CalendarDays,
   Check,
   ChevronRight,
   CircleDollarSign,
@@ -89,9 +88,6 @@ function Index() {
                 <p className="truncate text-xl font-bold">Flux</p>
                 <p className="truncate text-xs text-muted-foreground">Logistik ohne Umwege</p>
               </div>
-            </div>
-            <div className="hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
-              <CalendarDays className="h-4 w-4" /> Sonntag, 27. September
             </div>
           </div>
           <nav aria-label="Bereiche" className="relative mt-5 grid grid-cols-4">
