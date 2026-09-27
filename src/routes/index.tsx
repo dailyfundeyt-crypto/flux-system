@@ -41,6 +41,7 @@ import { AnkaufDashboard } from "@/components/purchase/ankauf-dashboard";
 import { VerkaufDashboard } from "@/components/sale/verkauf-dashboard";
 import { LieferungDashboard } from "@/components/sale/lieferung-dashboard";
 import { UmsatzDashboard } from "@/components/umsatz/umsatz-dashboard";
+import { LandingPage } from "@/components/landing/landing-page";
 import logoAsset from "@/assets/flux-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -80,6 +81,11 @@ function Index() {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const prevUserId = useRef<string | null>(null);
+
+  // Show landing page when not signed in.
+  if (auth.status.kind !== "signed_in") {
+    return <LandingPage />;
+  }
 
   // Hydrate from Supabase whenever a user signs in (per-user scope)
   useEffect(() => {
@@ -247,10 +253,6 @@ function Index() {
         stores={stores}
         onStoresChange={setStores}
       />
-
-      {auth.status.kind === "signed_out" && auth.credentials && !auth.error && (
-        <AuthScreen auth={auth} />
-      )}
 
       <div ref={scroller} onScroll={onScroll} className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <Page title="Ankauf" kicker="Beschaffung" subtitle="Einkäufe mit allen Items, Bildern, KI-Beschreibungen und Profit-Tracking.">
