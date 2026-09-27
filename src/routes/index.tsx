@@ -7,11 +7,12 @@ import {
   Check,
   ChevronRight,
   CircleDollarSign,
-  Clock3,
+  FileUp,
   PackageCheck,
   Plus,
+  QrCode,
+  Trash2,
   TrendingUp,
-  Truck,
   UserRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,11 +53,6 @@ function Index() {
   const [active, setActive] = useState(0);
   const [purchases, setPurchases] = useState(initialPurchases);
   const [sales, setSales] = useState(initialSales);
-  const [deliveries, setDeliveries] = useState([
-    { name: "Bauprojekt West", detail: "Heute · 14:00–16:00", amount: "Unterwegs", time: "Köln" },
-    { name: "Atelier Hansen", detail: "Morgen · 09:00–11:00", amount: "Geplant", time: "Düsseldorf" },
-    { name: "Formwerk Studio", detail: "29. Sep. · 12:00–14:00", amount: "Bereit", time: "Bonn" },
-  ]);
   const [notice, setNotice] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
 
