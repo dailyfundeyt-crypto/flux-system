@@ -1,19 +1,22 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
   Box,
   Check,
+  ChevronDown,
   ChevronRight,
   CircleDollarSign,
   FileUp,
+  Maximize2,
   PackageCheck,
   Plus,
   QrCode,
   Trash2,
   TrendingUp,
   UserRound,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,10 +52,45 @@ const initialSales: Entry[] = [
   { name: "Formwerk Studio", detail: "32 × Verpackungseinheit", amount: "768,00 €", time: "Gestern, 14:47" },
 ];
 
+type MoneyLine = { id: number; label: string; amount: number };
+type RevenueLine = { id: number; store: string; amount: number };
+type PurchaseBatch = { id: number; label: string; purchaseIds: number[]; revenueIds: number[] };
+
+const initialRevenue: RevenueLine[] = [
+  { id: 1, store: "Atelier Hansen", amount: 1272 },
+  { id: 2, store: "Bauprojekt West", amount: 2322 },
+  { id: 3, store: "Formwerk Studio", amount: 768 },
+  { id: 4, store: "Nordwerk Online", amount: 1840 },
+  { id: 5, store: "Studio Lindqvist", amount: 945 },
+  { id: 6, store: "Werkraum Süd", amount: 612 },
+];
+
+const initialPurchaseLines: MoneyLine[] = [
+  { id: 1, label: "Nordwerk GmbH", amount: 1824 },
+  { id: 2, label: "Meyer Großhandel", amount: 846 },
+  { id: 3, label: "Kern & Sohn", amount: 1140 },
+];
+
+const initialShippingLines: MoneyLine[] = [
+  { id: 1, label: "DHL Express", amount: 48.9 },
+  { id: 2, label: "Hermes Sperrgut", amount: 32.5 },
+  { id: 3, label: "DPD Paletten", amount: 89.0 },
+];
+
+const initialPurchaseBatches: PurchaseBatch[] = [
+  { id: 1, label: "Einkauf 1", purchaseIds: [1], revenueIds: [1, 4] },
+  { id: 2, label: "Einkauf 2", purchaseIds: [2], revenueIds: [2, 6] },
+  { id: 3, label: "Einkauf 3", purchaseIds: [3], revenueIds: [3, 5] },
+];
+
 function Index() {
   const [active, setActive] = useState(0);
   const [purchases, setPurchases] = useState(initialPurchases);
   const [sales, setSales] = useState(initialSales);
+  const [revenue, setRevenue] = useState(initialRevenue);
+  const [purchaseLines, setPurchaseLines] = useState(initialPurchaseLines);
+  const [shippingLines, setShippingLines] = useState(initialShippingLines);
+  const [purchaseBatches, setPurchaseBatches] = useState(initialPurchaseBatches);
   const [notice, setNotice] = useState("");
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -149,17 +187,24 @@ function Index() {
           </div>
         </section>
 
-        <Page title="Umsatz" kicker="Finanzen" subtitle="Entwicklung, Marge und Buchungen auf einen Blick.">
-          <MetricGrid items={[
-            ["Umsatz", "28.640 €", "+12,8 %", <TrendingUp />],
-            ["Rohertrag", "9.310 €", "+9,6 %", <CircleDollarSign />],
-            ["Marge", "32,5 %", "+1,4 %", <ArrowUpRight />],
-          ]} />
-          <ContentGrid>
-            <RevenueChart />
-            <EntryList title="Jüngste Buchungen" entries={sales.slice(0, 3)} icon={<CircleDollarSign />} />
-          </ContentGrid>
-        </Page>
+        <section className="w-full shrink-0 snap-start bg-white px-4 py-8 text-neutral-900 sm:px-8 sm:py-12">
+          <div className="mx-auto max-w-7xl">
+            <p className="text-xs font-semibold uppercase text-neutral-400">Finanzen</p>
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Umsatz</h1>
+            <p className="mt-2 text-sm text-neutral-500">Ankäufe, Versand, Erlöse und Rentabilität pro Einkauf im Überblick.</p>
+            <RevenueWorkspace
+              purchaseLines={purchaseLines}
+              onPurchaseLinesChange={setPurchaseLines}
+              shippingLines={shippingLines}
+              onShippingLinesChange={setShippingLines}
+              revenue={revenue}
+              onRevenueChange={setRevenue}
+              batches={purchaseBatches}
+              onBatchesChange={setPurchaseBatches}
+            />
+            <RevenueDonutChart revenue={revenue} />
+          </div>
+        </section>
       </div>
     </main>
   );
@@ -234,7 +279,22 @@ function TradeForm({ mode, onAdd }: { mode: "Ankauf" | "Verkauf"; onAdd: (entry:
   );
 }
 
-type DeliveryRow = { id: number; box: string; qr: string | null; invoice: string | null };
+type DeliveryFile = { dataUrl: string; name: string; kind: "image" | "pdf" };
+type DeliveryRow = { id: number; box: string; qr: DeliveryFile | null; invoice: DeliveryFile | null };
+
+function readFile(file: File): Promise<DeliveryFile> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error);
+    reader.onload = () =>
+      resolve({
+        dataUrl: String(reader.result),
+        name: file.name,
+        kind: file.type === "application/pdf" ? "pdf" : "image",
+      });
+    reader.readAsDataURL(file);
+  });
+}
 
 function DeliveryTable() {
   const [rows, setRows] = useState<DeliveryRow[]>([
@@ -242,30 +302,77 @@ function DeliveryTable() {
     { id: 2, box: "2", qr: null, invoice: null },
   ]);
   const nextId = useRef(3);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const update = (id: number, patch: Partial<DeliveryRow>) =>
     setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
 
-  const addRow = () => setRows((current) => [...current, { id: nextId.current++, box: String(current.length + 1), qr: null, invoice: null }]);
-  const removeRow = (id: number) => setRows((current) => current.filter((row) => row.id !== id));
+  const addRow = () =>
+    setRows((current) => [...current, { id: nextId.current++, box: String(current.length + 1), qr: null, invoice: null }]);
+  const removeRow = (id: number) =>
+    setRows((current) => current.filter((row) => row.id !== id));
 
-  const pickFile = (id: number, kind: "qr" | "invoice", accept: string) => {
+  const pickFile = async (id: number, kind: "qr" | "invoice") => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = accept;
-    input.onchange = () => {
+    input.accept = "image/*,.pdf";
+    input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
-      if (kind === "qr") {
-        const reader = new FileReader();
-        reader.onload = () => update(id, { qr: String(reader.result) });
-        reader.readAsDataURL(file);
-      } else {
-        update(id, { invoice: file.name });
+      try {
+        const data = await readFile(file);
+        update(id, { [kind]: data } as Partial<DeliveryRow>);
+      } catch (error) {
+        console.error("Datei konnte nicht gelesen werden", error);
       }
     };
     input.click();
   };
+
+  const clearFile = (id: number, kind: "qr" | "invoice") =>
+    update(id, { [kind]: null } as Partial<DeliveryRow>);
+
+  const openPreview = (index: number) => {
+    if (!rows[index]?.qr) return;
+    setPreviewIndex(index);
+  };
+
+  const closePreview = useCallback(() => setPreviewIndex(null), []);
+
+  const stepPreview = useCallback(
+    (direction: 1 | -1) => {
+      setPreviewIndex((current) => {
+        if (current === null) return null;
+        const total = rows.length;
+        let next = current;
+        for (let i = 0; i < total; i += 1) {
+          next = (next + direction + total) % total;
+          if (rows[next]?.qr) return next;
+        }
+        return current;
+      });
+    },
+    [rows],
+  );
+
+  useEffect(() => {
+    if (previewIndex === null) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePreview();
+      if (event.key === "ArrowDown" || event.key === "ArrowRight") stepPreview(1);
+      if (event.key === "ArrowUp" || event.key === "ArrowLeft") stepPreview(-1);
+    };
+    window.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [previewIndex, closePreview, stepPreview]);
+
+  const previewRow = previewIndex !== null ? rows[previewIndex] : null;
+  const previewBoxNumber = previewRow?.box ?? "";
+  const previewTitle = previewRow ? `Paket ${previewRow.box} · QR-Code` : "";
 
   return (
     <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
@@ -279,36 +386,96 @@ function DeliveryTable() {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <tr key={row.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
               <td className="px-4 py-3">
-                <input
-                  value={row.box}
-                  onChange={(event) => update(row.id, { box: event.target.value })}
-                  placeholder="0"
-                  aria-label="Karton-Nummer"
-                  className="w-14 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-medium outline-none focus:border-neutral-300 focus:bg-white"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    value={row.box}
+                    onChange={(event) => update(row.id, { box: event.target.value })}
+                    placeholder="0"
+                    aria-label="Paket-Nummer"
+                    className="w-14 rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </div>
               </td>
               <td className="px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => pickFile(row.id, "qr", "image/*")}
-                  className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600"
-                  aria-label="QR-Code hochladen"
-                >
-                  {row.qr ? <img src={row.qr} alt="QR-Code" className="h-full w-full object-cover" /> : <QrCode className="h-5 w-5" />}
-                </button>
+                <div className="flex items-center gap-3">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => openPreview(index)}
+                      disabled={!row.qr}
+                      className="group relative flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-md border border-dashed border-neutral-300 text-neutral-400 transition-colors hover:border-neutral-400 hover:text-neutral-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-label={row.qr ? `QR-Code von Paket ${row.box} in Vollbild anzeigen` : `QR-Code für Paket ${row.box} hochladen`}
+                    >
+                      {row.qr ? (
+                        row.qr.kind === "image" ? (
+                          <img src={row.qr.dataUrl} alt={`QR-Code Paket ${row.box}`} className="h-full w-full object-cover" />
+                        ) : (
+                          <FileUp className="h-5 w-5 text-rose-500" />
+                        )
+                      ) : (
+                        <QrCode className="h-5 w-5" />
+                      )}
+                      {row.qr && (
+                        <span className="absolute inset-0 grid place-items-center bg-black/0 text-white opacity-0 transition-opacity group-hover:bg-black/40 group-hover:opacity-100">
+                          <Maximize2 className="h-4 w-4" />
+                        </span>
+                      )}
+                    </button>
+                    <span
+                      className="pointer-events-none absolute -top-1.5 -left-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-neutral-900 px-1 text-[10px] font-semibold leading-none text-white shadow-sm"
+                      aria-hidden="true"
+                    >
+                      {row.box || "·"}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => pickFile(row.id, "qr")}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-600 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
+                  >
+                    <QrCode className="h-3.5 w-3.5" /> {row.qr ? "Ersetzen" : "Hochladen"}
+                  </button>
+                  {row.qr && (
+                    <button
+                      type="button"
+                      onClick={() => clearFile(row.id, "qr")}
+                      className="rounded-md p-1 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                      aria-label="QR-Code entfernen"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </td>
               <td className="px-4 py-3">
-                <button
-                  type="button"
-                  onClick={() => pickFile(row.id, "invoice", ".pdf,image/*")}
-                  className="flex max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800"
-                >
-                  <FileUp className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{row.invoice ?? "Rechnung hochladen"}</span>
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => pickFile(row.id, "invoice")}
+                    className="flex max-w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800"
+                  >
+                    <FileUp className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{row.invoice ? row.invoice.name : "Rechnung hochladen"}</span>
+                    {row.invoice?.kind === "pdf" && (
+                      <span className="shrink-0 rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-600">
+                        PDF
+                      </span>
+                    )}
+                  </button>
+                  {row.invoice && (
+                    <button
+                      type="button"
+                      onClick={() => clearFile(row.id, "invoice")}
+                      className="rounded-md p-1 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                      aria-label="Rechnung entfernen"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
               </td>
               <td className="px-4 py-3 text-right">
                 <button
@@ -331,6 +498,75 @@ function DeliveryTable() {
       >
         <Plus className="h-4 w-4" /> Neue Zeile
       </button>
+
+      {previewRow?.qr && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={previewTitle}
+          onClick={closePreview}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+        >
+          <div
+            onClick={(event) => event.stopPropagation()}
+            className="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between gap-4 border-b border-neutral-200 px-5 py-3">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">Vollbild-Vorschau</p>
+                <h2 className="truncate text-base font-semibold text-neutral-900">
+                  Paket {previewBoxNumber} · QR-Code
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => stepPreview(-1)}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-sm font-medium text-neutral-700 transition-colors hover:bg-neutral-100"
+                >
+                  <ChevronDown className="h-4 w-4 rotate-180" /> Vorheriges
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepPreview(1)}
+                  className="inline-flex items-center gap-1.5 rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-neutral-700"
+                >
+                  Nächstes Paket <ChevronDown className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={closePreview}
+                  className="ml-2 rounded-md p-1.5 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                  aria-label="Vorschau schließen"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="grid flex-1 place-items-center overflow-auto bg-neutral-50 p-6">
+              {previewRow.qr.kind === "pdf" ? (
+                <iframe
+                  src={previewRow.qr.dataUrl}
+                  title={`QR-Code Paket ${previewBoxNumber}`}
+                  className="h-[70vh] w-full rounded-md border border-neutral-200 bg-white"
+                />
+              ) : (
+                <img
+                  src={previewRow.qr.dataUrl}
+                  alt={`QR-Code Paket ${previewBoxNumber}`}
+                  className="max-h-[78vh] max-w-full rounded-md object-contain shadow-md"
+                />
+              )}
+            </div>
+            <div className="flex items-center justify-between gap-3 border-t border-neutral-200 bg-white px-5 py-3 text-xs text-neutral-500">
+              <span className="truncate">{previewRow.qr.name}</span>
+              <span className="shrink-0">
+                Paket {previewBoxNumber} · {previewIndex !== null ? previewIndex + 1 : 0} / {rows.length}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -351,14 +587,488 @@ function EntryList({ title, entries, icon, status = false }: { title: string; en
   );
 }
 
-function RevenueChart() {
-  const values = [42, 56, 49, 72, 63, 86, 78];
+const eur = (value: number) =>
+  value.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+
+function RevenueWorkspace({
+  purchaseLines,
+  onPurchaseLinesChange,
+  shippingLines,
+  onShippingLinesChange,
+  revenue,
+  onRevenueChange,
+  batches,
+  onBatchesChange,
+}: {
+  purchaseLines: MoneyLine[];
+  onPurchaseLinesChange: (rows: MoneyLine[]) => void;
+  shippingLines: MoneyLine[];
+  onShippingLinesChange: (rows: MoneyLine[]) => void;
+  revenue: RevenueLine[];
+  onRevenueChange: (rows: RevenueLine[]) => void;
+  batches: PurchaseBatch[];
+  onBatchesChange: (rows: PurchaseBatch[]) => void;
+}) {
+  const nextPurchaseId = useRef(purchaseLines.length + 100);
+  const nextShippingId = useRef(shippingLines.length + 200);
+  const nextRevenueId = useRef(revenue.length + 300);
+  const nextBatchId = useRef(batches.length + 400);
+
+  const purchaseTotal = purchaseLines.reduce((sum, line) => sum + line.amount, 0);
+  const shippingTotal = shippingLines.reduce((sum, line) => sum + line.amount, 0);
+  const revenueTotal = revenue.reduce((sum, line) => sum + line.amount, 0);
+
+  const updateLine = <T extends MoneyLine>(
+    rows: T[],
+    setter: (next: T[]) => void,
+    id: number,
+    patch: Partial<T>,
+  ) => setter(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+
+  const addPurchaseLine = () => {
+    const id = nextPurchaseId.current++;
+    onPurchaseLinesChange([...purchaseLines, { id, label: "", amount: 0 }]);
+  };
+  const addShippingLine = () => {
+    const id = nextShippingId.current++;
+    onShippingLinesChange([...shippingLines, { id, label: "", amount: 0 }]);
+  };
+  const addRevenueLine = () => {
+    const id = nextRevenueId.current++;
+    onRevenueChange([...revenue, { id, store: "", amount: 0 }]);
+  };
+  const addBatch = () => {
+    const id = nextBatchId.current++;
+    onBatchesChange([...batches, { id, label: `Einkauf ${batches.length + 1}`, purchaseIds: [], revenueIds: [] }]);
+  };
+
+  const updateBatch = (id: number, patch: Partial<PurchaseBatch>) =>
+    onBatchesChange(batches.map((batch) => (batch.id === id ? { ...batch, ...patch } : batch)));
+
+  const lookupPurchase = (id: number) => purchaseLines.find((line) => line.id === id);
+  const lookupRevenue = (id: number) => revenue.find((line) => line.id === id);
+
   return (
-    <Panel title="Umsatzentwicklung">
-      <div className="flex h-52 items-end gap-3 border-b border-border px-1 pb-2">
-        {values.map((value, index) => <div key={index} className="group relative flex h-full flex-1 items-end"><div className="w-full rounded-t-sm bg-primary/20 transition-colors group-hover:bg-primary" style={{ height: `${value}%` }} /></div>)}
+    <div className="mt-8 space-y-6">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <RevenueSummary label="Ankäufe gesamt" value={eur(purchaseTotal)} accent="neutral" />
+        <RevenueSummary label="Versand gesamt" value={eur(shippingTotal)} accent="neutral" />
+        <RevenueSummary
+          label="Umsatz gesamt"
+          value={eur(revenueTotal)}
+          accent="positive"
+          delta={`Marge ${(((revenueTotal - purchaseTotal - shippingTotal) / Math.max(revenueTotal, 1)) * 100).toFixed(1)} %`}
+        />
       </div>
-      <div className="mt-2 grid grid-cols-7 text-center text-[10px] text-muted-foreground">{["Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep"].map((month) => <span key={month}>{month}</span>)}</div>
-    </Panel>
+
+      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <th className="px-4 py-3">Alle Ankäufe</th>
+              <th className="px-4 py-3 w-32 text-right">Betrag</th>
+              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {purchaseLines.map((line) => (
+              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
+                <td className="px-4 py-2.5">
+                  <input
+                    value={line.label}
+                    onChange={(event) => updateLine(purchaseLines, onPurchaseLinesChange, line.id, { label: event.target.value })}
+                    placeholder="Lieferant oder Position"
+                    aria-label="Ankauf-Bezeichnung"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={line.amount}
+                    onChange={(event) => updateLine(purchaseLines, onPurchaseLinesChange, line.id, { amount: Number(event.target.value) || 0 })}
+                    aria-label="Ankauf-Betrag"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onPurchaseLinesChange(purchaseLines.filter((row) => row.id !== line.id))}
+                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                    aria-label="Ankauf entfernen"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t border-neutral-200 bg-neutral-50">
+              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Ankäufe</td>
+              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(purchaseTotal)}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+        <button
+          type="button"
+          onClick={addPurchaseLine}
+          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+        >
+          <Plus className="h-4 w-4" /> Neuer Ankauf
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <th className="px-4 py-3">Versandkosten</th>
+              <th className="px-4 py-3 w-32 text-right">Betrag</th>
+              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {shippingLines.map((line) => (
+              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
+                <td className="px-4 py-2.5">
+                  <input
+                    value={line.label}
+                    onChange={(event) => updateLine(shippingLines, onShippingLinesChange, line.id, { label: event.target.value })}
+                    placeholder="Carrier oder Sendung"
+                    aria-label="Versand-Bezeichnung"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={line.amount}
+                    onChange={(event) => updateLine(shippingLines, onShippingLinesChange, line.id, { amount: Number(event.target.value) || 0 })}
+                    aria-label="Versand-Betrag"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onShippingLinesChange(shippingLines.filter((row) => row.id !== line.id))}
+                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                    aria-label="Versandposition entfernen"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t border-neutral-200 bg-neutral-50">
+              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Versand</td>
+              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(shippingTotal)}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+        <button
+          type="button"
+          onClick={addShippingLine}
+          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+        >
+          <Plus className="h-4 w-4" /> Neue Versandposition
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <th className="px-4 py-3">Umsätze</th>
+              <th className="px-4 py-3 w-32 text-right">Betrag</th>
+              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {revenue.map((line) => (
+              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
+                <td className="px-4 py-2.5">
+                  <input
+                    value={line.store}
+                    onChange={(event) => onRevenueChange(revenue.map((row) => (row.id === line.id ? { ...row, store: event.target.value } : row)))}
+                    placeholder="Store oder Kunde"
+                    aria-label="Umsatz-Bezeichnung"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5">
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={line.amount}
+                    onChange={(event) => onRevenueChange(revenue.map((row) => (row.id === line.id ? { ...row, amount: Number(event.target.value) || 0 } : row)))}
+                    aria-label="Umsatz-Betrag"
+                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
+                  />
+                </td>
+                <td className="px-4 py-2.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => onRevenueChange(revenue.filter((row) => row.id !== line.id))}
+                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                    aria-label="Umsatz entfernen"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t border-neutral-200 bg-neutral-50">
+              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Umsätze</td>
+              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(revenueTotal)}</td>
+              <td />
+            </tr>
+          </tbody>
+        </table>
+        <button
+          type="button"
+          onClick={addRevenueLine}
+          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+        >
+          <Plus className="h-4 w-4" /> Neuer Umsatz
+        </button>
+      </div>
+
+      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+              <th className="px-4 py-3">Einkauf</th>
+              <th className="px-4 py-3">Zugeordnete Ankäufe</th>
+              <th className="px-4 py-3">Zugeordnete Umsätze</th>
+              <th className="px-4 py-3 w-32 text-right">Erlös</th>
+              <th className="px-4 py-3 w-32 text-right">Davon zurück</th>
+              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {batches.map((batch) => {
+              const batchCost = batch.purchaseIds.reduce((sum, id) => sum + (lookupPurchase(id)?.amount ?? 0), 0);
+              const batchReturn = batch.revenueIds.reduce((sum, id) => sum + (lookupRevenue(id)?.amount ?? 0), 0);
+              const ratio = batchCost > 0 ? batchReturn / batchCost : 0;
+              return (
+                <tr key={batch.id} className="border-b border-neutral-100 align-top transition-colors last:border-0 hover:bg-neutral-50">
+                  <td className="px-4 py-2.5">
+                    <input
+                      value={batch.label}
+                      onChange={(event) => updateBatch(batch.id, { label: event.target.value })}
+                      aria-label="Einkauf-Name"
+                      className="w-32 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:border-neutral-300 focus:bg-white"
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <BatchSelector
+                      options={purchaseLines}
+                      selected={batch.purchaseIds}
+                      placeholder="Ankauf hinzufügen"
+                      onChange={(next) => updateBatch(batch.id, { purchaseIds: next })}
+                      emptyLabel="Keine Ankäufe vorhanden"
+                      getLabel={(option) => option.label}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <BatchSelector
+                      options={revenue}
+                      selected={batch.revenueIds}
+                      placeholder="Umsatz hinzufügen"
+                      onChange={(next) => updateBatch(batch.id, { revenueIds: next })}
+                      emptyLabel="Keine Umsätze vorhanden"
+                      getLabel={(option) => option.store}
+                    />
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-sm font-semibold tabular-nums">{eur(batchCost)}</td>
+                  <td className="px-4 py-2.5 text-right">
+                    <div className="flex flex-col items-end gap-1">
+                      <span className="text-sm font-semibold tabular-nums">{eur(batchReturn)}</span>
+                      <span
+                        className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ratio >= 1 ? "bg-emerald-50 text-emerald-700" : ratio >= 0.5 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
+                      >
+                        {(ratio * 100).toFixed(0)} % refinanziert
+                      </span>
+                    </div>
+                  </td>
+                  <td className="px-4 py-2.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onBatchesChange(batches.filter((row) => row.id !== batch.id))}
+                      className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                      aria-label="Einkauf-Batch entfernen"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {batches.length === 0 && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center text-sm text-neutral-400">Noch keine Einkäufe zusammengefasst.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <button
+          type="button"
+          onClick={addBatch}
+          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+        >
+          <Plus className="h-4 w-4" /> Neuer Einkauf-Batch
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BatchSelector<T extends { id: number }>({
+  options,
+  selected,
+  placeholder,
+  onChange,
+  emptyLabel,
+  getLabel,
+}: {
+  options: T[];
+  selected: number[];
+  placeholder: string;
+  onChange: (next: number[]) => void;
+  emptyLabel: string;
+  getLabel: (option: T) => string;
+}) {
+  const labelOf = (option: T) => getLabel(option) || `Position ${option.id}`;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.length === 0 && <span className="text-xs text-neutral-400">{emptyLabel}</span>}
+      {options.map((option) => {
+        const active = selected.includes(option.id);
+        return (
+          <button
+            key={option.id}
+            type="button"
+            onClick={() => onChange(active ? selected.filter((id) => id !== option.id) : [...selected, option.id])}
+            className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs transition-colors ${active ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-100"}`}
+            aria-pressed={active}
+          >
+            {labelOf(option)}
+          </button>
+        );
+      })}
+      <select
+        value=""
+        onChange={(event) => {
+          const id = Number(event.target.value);
+          if (id && !selected.includes(id)) onChange([...selected, id]);
+          event.target.value = "";
+        }}
+        className="rounded-full border border-dashed border-neutral-300 bg-white px-2 py-0.5 text-xs text-neutral-500 outline-none focus:border-neutral-400"
+        aria-label={placeholder}
+      >
+        <option value="">{placeholder}</option>
+        {options.filter((option) => !selected.includes(option.id)).map((option) => (
+          <option key={option.id} value={option.id}>{labelOf(option)}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function RevenueSummary({ label, value, accent, delta }: { label: string; value: string; accent: "neutral" | "positive"; delta?: string }) {
+  return (
+    <div className={`rounded-lg border p-4 ${accent === "positive" ? "border-emerald-200 bg-emerald-50/40" : "border-neutral-200 bg-white"}`}>
+      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
+      <p className={`mt-1.5 text-2xl font-bold tabular-nums ${accent === "positive" ? "text-emerald-700" : "text-neutral-900"}`}>{value}</p>
+      {delta && <p className="mt-1 text-xs text-neutral-500">{delta}</p>}
+    </div>
+  );
+}
+
+const donutPalette = [
+  "#0ea5e9",
+  "#6366f1",
+  "#8b5cf6",
+  "#ec4899",
+  "#f97316",
+  "#10b981",
+  "#f59e0b",
+  "#06b6d4",
+  "#84cc16",
+  "#a855f7",
+];
+
+function RevenueDonutChart({ revenue }: { revenue: RevenueLine[] }) {
+  const total = revenue.reduce((sum, line) => sum + line.amount, 0);
+  const top = [...revenue]
+    .filter((line) => line.amount > 0)
+    .sort((a, b) => b.amount - a.amount);
+
+  if (total <= 0) {
+    return (
+      <div className="mt-8 overflow-hidden rounded-lg border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-400 shadow-sm">
+        Sobald Umsätze erfasst sind, erscheint hier die Store-Verteilung.
+      </div>
+    );
+  }
+
+  const radius = 70;
+  const inner = 46;
+  const stroke = radius - inner;
+  const cx = 100;
+  const cy = 100;
+  const circumference = 2 * Math.PI * (radius - stroke / 2);
+
+  let offset = 0;
+  const segments = top.map((line, index) => {
+    const fraction = line.amount / total;
+    const dash = circumference * fraction;
+    const segment = { ...line, color: donutPalette[index % donutPalette.length], fraction, dash, offset };
+    offset += dash;
+    return segment;
+  });
+
+  return (
+    <div className="mt-8 grid grid-cols-1 gap-6 overflow-hidden rounded-lg border border-neutral-200 bg-white p-6 shadow-sm md:grid-cols-[auto_minmax(0,1fr)] md:items-center">
+      <div className="grid place-items-center">
+        <svg viewBox="0 0 200 200" className="h-52 w-52" role="img" aria-label="Umsatzverteilung nach Store">
+          <g transform={`rotate(-90 ${cx} ${cy})`}>
+            <circle cx={cx} cy={cy} r={radius - stroke / 2} fill="none" stroke="#f1f5f9" strokeWidth={stroke} />
+            {segments.map((segment) => (
+              <circle
+                key={segment.id}
+                cx={cx}
+                cy={cy}
+                r={radius - stroke / 2}
+                fill="none"
+                stroke={segment.color}
+                strokeWidth={stroke}
+                strokeDasharray={`${segment.dash} ${circumference - segment.dash}`}
+                strokeDashoffset={-segment.offset}
+              />
+            ))}
+          </g>
+          <text x={cx} y={cy - 6} textAnchor="middle" className="fill-neutral-400" style={{ fontSize: 11, fontWeight: 600, letterSpacing: 0.5, textTransform: "uppercase" }}>Gesamt</text>
+          <text x={cx} y={cy + 14} textAnchor="middle" className="fill-neutral-900" style={{ fontSize: 18, fontWeight: 700 }}>{eur(total)}</text>
+        </svg>
+      </div>
+      <ul className="min-w-0 space-y-2">
+        {segments.map((segment, index) => (
+          <li key={segment.id} className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 text-sm">
+            <span className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: segment.color }} aria-hidden="true" />
+            <span className="min-w-0 truncate font-medium text-neutral-800">{segment.store || `Store ${index + 1}`}</span>
+            <span className="text-right tabular-nums text-neutral-600">{eur(segment.amount)} <span className="ml-1 text-neutral-400">({(segment.fraction * 100).toFixed(1)} %)</span></span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
