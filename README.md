@@ -1,14 +1,16 @@
-# Welcome to your Lovable project
+# Flux System
+
+Die Flux App sollte aus 4 Bereichen bestehen die Oben per Schiebe regler angseteuert werden können indem man per wischen nach links von einem in den nächsten bereich wächselt. Die Bereich e die ich haben will sind Ankauf, Verkauf,Lieferung und Umsatz. Das ist das logo (das Bild)
 
 This project was built with [Lovable](https://lovable.dev).
 
 ## Build with Lovable
 
-Open your project in the [Lovable editor](https://lovable.dev) and keep building.
+Continue developing this project in the [Lovable editor](https://lovable.dev/projects/ef543557-b9e6-4267-b35d-32758b715206).
 
 - **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: connect the project to GitHub and every change made in Lovable is committed straight to your repository.
-- **Full ownership**: this code is yours. Push to your repository and your changes sync back into Lovable, ready for your next prompt.
+- **Stay in sync**: every change made in Lovable is committed straight to this repository.
+- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
 
 ## Development
 
@@ -20,10 +22,3 @@ cd <repository-name>
 npm i
 npm run dev
 ```
-
-## Built with
-
-- TanStack Start
-- TypeScript
-- React
-- Tailwind CSS
