@@ -7,7 +7,7 @@ import {
   CalendarDays,
   Check,
   ChevronRight,
-  CircleEuro,
+  CircleDollarSign,
   Clock3,
   PackageCheck,
   Plus,
@@ -126,7 +126,7 @@ function Index() {
           <MetricGrid items={[
             ["Einkaufswert", "3.810,00 €", "+8,4 %", <ArrowDownLeft />],
             ["Bestellungen", "17", "diesen Monat", <Box />],
-            ["Ø Einkauf", "224,12 €", "pro Bestellung", <CircleEuro />],
+            ["Ø Einkauf", "224,12 €", "pro Bestellung", <CircleDollarSign />],
           ]} />
           <ContentGrid>
             <TradeForm mode="Ankauf" onAdd={(entry) => { setPurchases([entry, ...purchases]); flash("Ankauf wurde erfasst"); }} />
@@ -138,7 +138,7 @@ function Index() {
           <MetricGrid items={[
             ["Verkaufswert", "6.482,00 €", "+14,2 %", <ArrowUpRight />],
             ["Aufträge", "23", "diesen Monat", <PackageCheck />],
-            ["Ø Verkauf", "281,83 €", "pro Auftrag", <CircleEuro />],
+            ["Ø Verkauf", "281,83 €", "pro Auftrag", <CircleDollarSign />],
           ]} />
           <ContentGrid>
             <TradeForm mode="Verkauf" onAdd={(entry) => { setSales([entry, ...sales]); flash("Verkauf wurde erfasst"); }} />
@@ -161,12 +161,12 @@ function Index() {
         <Page title="Umsatz" kicker="Finanzen" subtitle="Entwicklung, Marge und Buchungen auf einen Blick.">
           <MetricGrid items={[
             ["Umsatz", "28.640 €", "+12,8 %", <TrendingUp />],
-            ["Rohertrag", "9.310 €", "+9,6 %", <CircleEuro />],
+            ["Rohertrag", "9.310 €", "+9,6 %", <CircleDollarSign />],
             ["Marge", "32,5 %", "+1,4 %", <ArrowUpRight />],
           ]} />
           <ContentGrid>
             <RevenueChart />
-            <EntryList title="Jüngste Buchungen" entries={sales.slice(0, 3)} icon={<CircleEuro />} />
+            <EntryList title="Jüngste Buchungen" entries={sales.slice(0, 3)} icon={<CircleDollarSign />} />
           </ContentGrid>
         </Page>
       </div>
