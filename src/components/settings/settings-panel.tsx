@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+﻿import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
@@ -10,15 +10,17 @@ import {
   LogOut,
   Moon,
   Settings as SettingsIcon,
+  Store as StoreIcon,
   Sun,
   User as UserIcon,
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/lib/supabase/auth";
-import { updateProfile } from "@/lib/supabase/snapshot";
+import { updateProfile, type Store as StoreModel } from "@/lib/supabase/snapshot";
 import type { SyncStatus } from "@/lib/supabase/types";
 import { AvatarUploader } from "@/components/auth/avatar-uploader";
+import { StoresPanel } from "@/components/stores/stores-panel";
 
 type SettingsPanelProps = {
   open: boolean;
@@ -26,13 +28,15 @@ type SettingsPanelProps = {
   onClose: () => void;
   status: SyncStatus;
   lastSavedAt: number | null;
+  stores: StoreModel[];
+  onStoresChange: (next: StoreModel[]) => void;
 };
 
-type View = "menu" | "account" | "appearance" | "connections";
+type View = "menu" | "account" | "appearance" | "connections" | "stores";
 
 type Theme = "light" | "dark" | "system";
 
-export function SettingsPanel({ open, onOpen, onClose, status, lastSavedAt }: SettingsPanelProps) {
+export function SettingsPanel({ open, onOpen, onClose, status, lastSavedAt, stores, onStoresChange }: SettingsPanelProps) {
   const auth = useAuth();
   const [view, setView] = useState<View>("menu");
   const [theme, setTheme] = useState<Theme>("system");
@@ -81,7 +85,7 @@ export function SettingsPanel({ open, onOpen, onClose, status, lastSavedAt }: Se
         <button
           type="button"
           onClick={onOpen}
-          aria-label="Einstellungen öffnen"
+          aria-label="Einstellungen Ã¶ffnen"
           className="grid h-9 w-9 place-items-center rounded-full bg-white text-neutral-700 shadow ring-1 ring-neutral-200 transition-colors hover:bg-neutral-900 hover:text-white hover:ring-neutral-900"
         >
           <SettingsIcon className="h-4 w-4" />
@@ -97,10 +101,11 @@ export function SettingsPanel({ open, onOpen, onClose, status, lastSavedAt }: Se
         >
           <Header title={view === "menu" ? "Einstellungen" : titleFor(view)} showBack={view !== "menu"} onBack={goBack} onClose={onClose} />
 
-          {view === "menu" && <SettingsMenu onNavigate={setView} onSignOut={() => void auth.signOut()} status={status} lastSavedAt={lastSavedAt} />}
+          {view === "menu" && <SettingsMenu onNavigate={setView} onSignOut={() => void auth.signOut()} status={status} lastSavedAt={lastSavedAt} stores={stores} onStoresChange={onStoresChange} />}
           {view === "account" && <AccountView />}
           {view === "appearance" && <AppearanceView theme={theme} onThemeChange={applyTheme} />}
           {view === "connections" && <ConnectionsView />}
+          {view === "stores" && <StoresPanel stores={stores} onStoresChange={onStoresChange} />}
         </div>
       )}
     </div>
@@ -112,6 +117,7 @@ function titleFor(view: Exclude<View, "menu">) {
     case "account": return "Konto";
     case "appearance": return "Theme";
     case "connections": return "Verbindung";
+    case "stores": return "Stores";
   }
 }
 
@@ -123,7 +129,7 @@ function Header({ title, showBack, onBack, onClose }: { title: string; showBack:
           type="button"
           onClick={onBack}
           className="rounded p-1 text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-900"
-          aria-label="Zurück"
+          aria-label="ZurÃ¼ck"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
         </button>
@@ -135,7 +141,7 @@ function Header({ title, showBack, onBack, onClose }: { title: string; showBack:
         type="button"
         onClick={onClose}
         className="rounded p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
-        aria-label="Schließen"
+        aria-label="SchlieÃŸen"
       >
         <X className="h-3.5 w-3.5" />
       </button>
@@ -148,11 +154,15 @@ function SettingsMenu({
   onSignOut,
   status,
   lastSavedAt,
+  stores,
+  onStoresChange,
 }: {
   onNavigate: (view: View) => void;
   onSignOut: () => void;
   status: SyncStatus;
   lastSavedAt: number | null;
+  stores: StoreModel[];
+  onStoresChange: (next: StoreModel[]) => void;
 }) {
   const auth = useAuth();
   const profile = auth.status.kind === "signed_in" ? auth.status.profile : null;
@@ -183,6 +193,7 @@ function SettingsMenu({
       <div className="grid gap-0.5 px-1 pb-2">
         <Item icon={<UserIcon className="h-3.5 w-3.5" />} label="Konto" disabled={!signedIn} onClick={() => onNavigate("account")} />
         <Item icon={<Moon className="h-3.5 w-3.5" />} label="Theme" onClick={() => onNavigate("appearance")} />
+        <Item icon={<StoreIcon className="h-3.5 w-3.5" />} label={`Stores (${stores.length})`} onClick={() => onNavigate("stores")} />
         <Item icon={<Database className="h-3.5 w-3.5" />} label="Verbindung" onClick={() => onNavigate("connections")} />
         {signedIn ? (
           <Item icon={<LogOut className="h-3.5 w-3.5" />} label="Abmelden" danger onClick={onSignOut} />
@@ -288,7 +299,7 @@ function AccountView() {
         className="flex w-full items-center justify-center gap-1.5 rounded bg-neutral-900 px-2 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-neutral-700 disabled:opacity-50"
       >
         {saved ? <Check className="h-3 w-3" /> : null}
-        {saved ? "Gespeichert" : saving ? "Speichern …" : "Profil speichern"}
+        {saved ? "Gespeichert" : saving ? "Speichern â€¦" : "Profil speichern"}
       </button>
 
       <p className="text-[10px] text-neutral-500">E-Mail: {auth.status.user.email}</p>
@@ -380,7 +391,7 @@ function ConnectionsView() {
       <p className="text-[10px] text-neutral-500">
         Trage deine Supabase-Projekt-URL und den anon-Key ein. Beides findest du unter
         <a href="https://supabase.com/dashboard/project/_/settings/api" target="_blank" rel="noreferrer" className="ml-0.5 inline-flex items-center gap-0.5 font-medium text-neutral-700 hover:text-neutral-900">
-          Project Settings → API <ExternalLink className="h-2.5 w-2.5" />
+          Project Settings â†’ API <ExternalLink className="h-2.5 w-2.5" />
         </a>
       </p>
 
@@ -388,7 +399,7 @@ function ConnectionsView() {
         <Input
           value={url}
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="https://…supabase.co"
+          placeholder="https://â€¦supabase.co"
           autoComplete="off"
         />
       </FormRow>
@@ -397,7 +408,7 @@ function ConnectionsView() {
           <Input
             value={anonKey}
             onChange={(event) => setAnonKey(event.target.value)}
-            placeholder="eyJhbGciOi…"
+            placeholder="eyJhbGciOiâ€¦"
             type={showKey ? "text" : "password"}
             autoComplete="off"
           />
@@ -418,7 +429,7 @@ function ConnectionsView() {
         disabled={testing || !url.trim() || !anonKey.trim()}
         className="w-full rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-50"
       >
-        {testing ? "Teste …" : "Verbindung testen"}
+        {testing ? "Teste â€¦" : "Verbindung testen"}
       </button>
 
       {test && (

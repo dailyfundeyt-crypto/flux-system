@@ -28,6 +28,7 @@ import {
   uploadPurchaseImage,
   type Purchase,
   type PurchaseItem,
+  type Store,
 } from "@/lib/supabase/snapshot";
 
 const eur = (value: number) =>
@@ -36,6 +37,7 @@ const eur = (value: number) =>
 type AnkaufDashboardProps = {
   purchases: Purchase[];
   items: PurchaseItem[];
+  stores: Store[];
   onPurchaseChange: (next: Purchase[]) => void;
   onItemChange: (next: PurchaseItem[]) => void;
   onSold: (item: PurchaseItem, salePrice: number, customerName: string) => void;
@@ -51,6 +53,9 @@ type ItemFormState = {
   imageUrl: string | null;
   salePrice: string;
   customerName: string;
+  storeId: number | null;
+  affiliateUrl: string;
+  listStrategy: "online" | "offline" | "bundle" | "unsorted";
 };
 
 const emptyItemForm: ItemFormState = {
@@ -63,11 +68,15 @@ const emptyItemForm: ItemFormState = {
   imageUrl: null,
   salePrice: "",
   customerName: "",
+  storeId: null,
+  affiliateUrl: "",
+  listStrategy: "unsorted",
 };
 
 export function AnkaufDashboard({
   purchases,
   items,
+  stores,
   onPurchaseChange,
   onItemChange,
   onSold,
@@ -203,6 +212,9 @@ export function AnkaufDashboard({
         imageUrl: item.imageUrl,
         salePrice: item.salePrice !== null ? String(item.salePrice) : "",
         customerName: "",
+        storeId: item.storeId,
+        affiliateUrl: item.affiliateUrl ?? "",
+        listStrategy: item.listStrategy,
       },
     });
   };
@@ -224,7 +236,18 @@ export function AnkaufDashboard({
     if (form.id !== null) {
       const updated = items.map((it) =>
         it.id === form.id
-          ? { ...it, title: form.title, description: form.description, conditionNotes: form.conditionNotes, pricePaid, shippingShare, imageUrl }
+          ? {
+              ...it,
+              title: form.title,
+              description: form.description,
+              conditionNotes: form.conditionNotes,
+              pricePaid,
+              shippingShare,
+              imageUrl,
+              storeId: form.storeId,
+              affiliateUrl: form.affiliateUrl || null,
+              listStrategy: form.listStrategy,
+            }
           : it,
       );
       onItemChange(updated);
@@ -249,6 +272,14 @@ export function AnkaufDashboard({
         soldAt: null,
         salePrice: null,
         saleOrderId: null,
+        storeId: form.storeId,
+        listStrategy: form.listStrategy,
+        affiliateUrl: form.affiliateUrl || null,
+        listedAt: null,
+        recommendation: "",
+        recommendationReason: "",
+        suggestedPrice: null,
+        assignedBoxNo: null,
       };
       onItemChange([newItem, ...items]);
       onPurchaseChange(purchases.map((p) => (p.id === purchaseId ? { ...p, itemCounter: newCounter } : p)));
@@ -476,6 +507,7 @@ export function AnkaufDashboard({
       {itemModal && (
         <ItemFormModal
           state={itemModal.item}
+          stores={stores}
           onClose={() => setItemModal(null)}
           onSave={(form, file) => void handleSaveItem(itemModal.purchaseId, form, file)}
           uploading={uploadState.uploading}
@@ -649,11 +681,13 @@ function PurchaseFormModal({ onClose, onSubmit, uploading }: { onClose: () => vo
 
 function ItemFormModal({
   state,
+  stores,
   onClose,
   onSave,
   uploading,
 }: {
   state: ItemFormState;
+  stores: Store[];
   onClose: () => void;
   onSave: (form: ItemFormState, image: File | null) => void;
   uploading: boolean;
@@ -710,6 +744,43 @@ function ItemFormModal({
             <Input type="number" step="0.01" min="0" value={form.shippingShare} onChange={(e) => set("shippingShare", e.target.value)} />
           </Field>
         </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Store">
+            <select
+              value={form.storeId ?? ""}
+              onChange={(e) => set("storeId", e.target.value ? Number(e.target.value) : null)}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm outline-none focus-visible:border-neutral-400"
+            >
+              <option value="">— ohne Store —</option>
+              {stores.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Strategie">
+            <select
+              value={form.listStrategy}
+              onChange={(e) => set("listStrategy", e.target.value as ItemFormState["listStrategy"])}
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-sm outline-none focus-visible:border-neutral-400"
+            >
+              <option value="unsorted">unsorted</option>
+              <option value="online">online (Einzel-Listing)</option>
+              <option value="offline">offline (Flohmarkt / Börse)</option>
+              <option value="bundle">Bundle / Karton</option>
+            </select>
+          </Field>
+        </div>
+
+        <Field label="Affiliate-/Vergleichs-Link (optional)">
+          <Input
+            value={form.affiliateUrl}
+            onChange={(e) => set("affiliateUrl", e.target.value)}
+            placeholder="https://www.amazon.de/s?k=…"
+            inputMode="url"
+          />
+        </Field>
+
         <div className="flex justify-end gap-2 border-t border-neutral-100 pt-3">
           <Button type="button" variant="ghost" onClick={onClose}>Abbrechen</Button>
           <Button type="submit" disabled={!form.pricePaid || uploading}>

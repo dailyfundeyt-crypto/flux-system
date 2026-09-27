@@ -31,6 +31,35 @@ export type PurchaseItem = {
   soldAt: string | null;
   salePrice: number | null;
   saleOrderId: number | null;
+  // Store & listing (added v3)
+  storeId: number | null;
+  listStrategy: "online" | "offline" | "bundle" | "unsorted";
+  affiliateUrl: string | null;
+  listedAt: string | null;
+  recommendation: string;
+  recommendationReason: string;
+  suggestedPrice: number | null;
+  assignedBoxNo: number | null;
+};
+
+export type Store = {
+  id: number;
+  name: string;
+  platform: "kleinanzeigen" | "ebay" | "etsy" | "discogs" | "amazon" | "shopify" | "other" | "";
+  description: string;
+  profileImageUrl: string | null;
+  emoji: string;
+  aiStoreSuggestion: string | null;
+  affiliateLinks: Record<string, string>;
+};
+
+export type AffiliateLink = {
+  id: number;
+  itemId: number;
+  label: string;
+  url: string;
+  comparePrice: number | null;
+  fetchedAt: string;
 };
 
 export type PurchaseImage = {
@@ -51,7 +80,14 @@ export type Sale = {
 };
 
 export type DeliveryFile = { dataUrl: string; name: string; kind: "image" | "pdf" };
-export type DeliveryRow = { id: number; box: string; qr: DeliveryFile | null; invoice: DeliveryFile | null };
+export type DeliveryRow = {
+  id: number;
+  boxNo: number;  // 0 = unzugewiesen
+  qr: DeliveryFile | null;
+  invoice: DeliveryFile | null;
+  assignedItemIds: number[];
+  notes: string;
+};
 export type PurchaseLine = { id: number; label: string; amount: number };
 export type ShippingLine = PurchaseLine;
 export type RevenueLine = { id: number; store: string; amount: number };
@@ -61,6 +97,8 @@ export type WorkspaceState = {
   purchases: Purchase[];
   purchaseItems: PurchaseItem[];
   purchaseImages: PurchaseImage[];
+  stores: Store[];
+  affiliateLinks: AffiliateLink[];
   sales: Sale[];
   purchaseLines: PurchaseLine[];
   shippingLines: ShippingLine[];
@@ -102,8 +140,40 @@ type PurchaseItemRow = {
   sold_at: string | null;
   sale_price: number | null;
   sale_order_id: number | null;
+  store_id: number | null;
+  list_strategy: "online" | "offline" | "bundle" | "unsorted";
+  affiliate_url: string | null;
+  listed_at: string | null;
+  recommendation: string;
+  recommendation_reason: string;
+  suggested_price: number | null;
+  assigned_box_no: number | null;
   created_at: string;
   updated_at: string;
+};
+
+type StoreRow = {
+  id: number;
+  owner_id: string;
+  name: string;
+  platform: "kleinanzeigen" | "ebay" | "etsy" | "discogs" | "amazon" | "shopify" | "other" | "";
+  description: string;
+  profile_image_url: string | null;
+  emoji: string;
+  ai_store_suggestion: string | null;
+  affiliate_links: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+};
+
+type AffiliateLinkRow = {
+  id: number;
+  owner_id: string;
+  item_id: number;
+  label: string;
+  url: string;
+  compare_price: number | null;
+  fetched_at: string;
 };
 
 type PurchaseImageRow = {
@@ -133,13 +203,15 @@ type ShippingLineRow = PurchaseLineRow;
 type RevenueLineRow = BaseLineRow & { store: string; amount: number };
 type PurchaseBatchRow = BaseLineRow & { label: string; purchase_ids: number[]; revenue_ids: number[] };
 type DeliveryRowRow = BaseLineRow & {
-  box: string;
+  box_no: number;
   qr_data_url: string | null;
   qr_name: string | null;
   qr_kind: "image" | "pdf" | null;
   invoice_data_url: string | null;
   invoice_name: string | null;
   invoice_kind: "image" | "pdf" | null;
+  assigned_item_ids: number[];
+  notes: string;
 };
 
 function rowToFile(d: { dataUrl: string; name: string; kind: "image" | "pdf" } | null): DeliveryFile | null {
@@ -156,23 +228,27 @@ function deliveryToRow(row: DeliveryRow, ownerId: string, sortOrder: number): De
   return {
     id: row.id,
     owner_id: ownerId,
-    box: row.box,
+    box_no: row.boxNo,
     sort_order: sortOrder,
     ...fileToRow(row.qr),
     invoice_data_url: row.invoice?.dataUrl ?? null,
     invoice_name: row.invoice?.name ?? null,
     invoice_kind: row.invoice?.kind ?? null,
+    assigned_item_ids: row.assignedItemIds ?? [],
+    notes: row.notes ?? "",
   };
 }
 
 function rowToDelivery(row: DeliveryRowRow): DeliveryRow {
   return {
     id: row.id,
-    box: row.box,
+    boxNo: row.box_no,
     qr: rowToFile(row.qr_data_url ? { dataUrl: row.qr_data_url, name: row.qr_name ?? "", kind: row.qr_kind ?? "image" } : null),
     invoice: rowToFile(
       row.invoice_data_url ? { dataUrl: row.invoice_data_url, name: row.invoice_name ?? "", kind: row.invoice_kind ?? "image" } : null,
     ),
+    assignedItemIds: row.assigned_item_ids ?? [],
+    notes: row.notes ?? "",
   };
 }
 
@@ -223,6 +299,14 @@ function purchaseItemRowToModel(r: PurchaseItemRow): PurchaseItem {
     soldAt: r.sold_at,
     salePrice: r.sale_price !== null ? Number(r.sale_price) : null,
     saleOrderId: r.sale_order_id,
+    storeId: r.store_id,
+    listStrategy: r.list_strategy,
+    affiliateUrl: r.affiliate_url,
+    listedAt: r.listed_at,
+    recommendation: r.recommendation ?? "",
+    recommendationReason: r.recommendation_reason ?? "",
+    suggestedPrice: r.suggested_price !== null ? Number(r.suggested_price) : null,
+    assignedBoxNo: r.assigned_box_no,
   };
 }
 
@@ -246,8 +330,68 @@ function purchaseItemModelToRow(i: PurchaseItem, ownerId: string): PurchaseItemR
     sold_at: i.soldAt,
     sale_price: i.salePrice,
     sale_order_id: i.saleOrderId,
+    store_id: i.storeId,
+    list_strategy: i.listStrategy,
+    affiliate_url: i.affiliateUrl,
+    listed_at: i.listedAt,
+    recommendation: i.recommendation ?? "",
+    recommendation_reason: i.recommendationReason ?? "",
+    suggested_price: i.suggestedPrice,
+    assigned_box_no: i.assignedBoxNo,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
+  };
+}
+
+function storeRowToModel(r: StoreRow): Store {
+  return {
+    id: r.id,
+    name: r.name,
+    platform: r.platform,
+    description: r.description,
+    profileImageUrl: r.profile_image_url,
+    emoji: r.emoji,
+    aiStoreSuggestion: r.ai_store_suggestion,
+    affiliateLinks: r.affiliate_links ?? {},
+  };
+}
+
+function storeModelToRow(s: Store, ownerId: string): StoreRow {
+  return {
+    id: s.id,
+    owner_id: ownerId,
+    name: s.name,
+    platform: s.platform,
+    description: s.description,
+    profile_image_url: s.profileImageUrl,
+    emoji: s.emoji,
+    ai_store_suggestion: s.aiStoreSuggestion,
+    affiliate_links: s.affiliateLinks ?? {},
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+function affiliateLinkRowToModel(r: AffiliateLinkRow): AffiliateLink {
+  return {
+    id: r.id,
+    itemId: r.item_id,
+    label: r.label,
+    url: r.url,
+    comparePrice: r.compare_price !== null ? Number(r.compare_price) : null,
+    fetchedAt: r.fetched_at,
+  };
+}
+
+function affiliateLinkModelToRow(l: AffiliateLink, ownerId: string): AffiliateLinkRow {
+  return {
+    id: l.id,
+    owner_id: ownerId,
+    item_id: l.itemId,
+    label: l.label,
+    url: l.url,
+    compare_price: l.comparePrice,
+    fetched_at: l.fetchedAt,
   };
 }
 
@@ -304,6 +448,8 @@ export async function loadSnapshot(client: SupabaseClient, userId: string): Prom
     purchases,
     purchaseItems,
     purchaseImages,
+    stores,
+    affiliateLinks,
     sales,
     purchaseLines,
     shippingLines,
@@ -314,6 +460,8 @@ export async function loadSnapshot(client: SupabaseClient, userId: string): Prom
     client.from("purchases").select("*").eq("owner_id", userId).order("created_at", { ascending: true }),
     client.from("purchase_items").select("*").eq("owner_id", userId).order("created_at", { ascending: true }),
     client.from("purchase_images").select("*").eq("owner_id", userId).order("sort_order"),
+    client.from("stores").select("*").eq("owner_id", userId).order("created_at", { ascending: true }),
+    client.from("affiliate_links").select("*").eq("owner_id", userId).order("fetched_at", { ascending: false }),
     client.from("sales").select("*").eq("owner_id", userId).order("created_at", { ascending: true }),
     client.from("purchase_lines").select("*").eq("owner_id", userId).order("sort_order"),
     client.from("shipping_lines").select("*").eq("owner_id", userId).order("sort_order"),
@@ -325,6 +473,8 @@ export async function loadSnapshot(client: SupabaseClient, userId: string): Prom
     purchases: ((purchases.data ?? []) as PurchaseRow[]).map(purchaseRowToModel),
     purchaseItems: ((purchaseItems.data ?? []) as PurchaseItemRow[]).map(purchaseItemRowToModel),
     purchaseImages: ((purchaseImages.data ?? []) as PurchaseImageRow[]).map(purchaseImageRowToModel),
+    stores: ((stores.data ?? []) as StoreRow[]).map(storeRowToModel),
+    affiliateLinks: ((affiliateLinks.data ?? []) as AffiliateLinkRow[]).map(affiliateLinkRowToModel),
     sales: ((sales.data ?? []) as SaleRow[]).map(saleRowToModel),
     purchaseLines: ((purchaseLines.data ?? []) as PurchaseLineRow[]).map((r) => ({ id: r.id, label: r.label, amount: Number(r.amount) })),
     shippingLines: ((shippingLines.data ?? []) as ShippingLineRow[]).map((r) => ({ id: r.id, label: r.label, amount: Number(r.amount) })),
@@ -357,6 +507,8 @@ export async function saveSnapshot(client: SupabaseClient, userId: string, snaps
     replaceTable(client, "purchases", snapshot.purchases.map((p) => purchaseModelToRow(p, userId)), userId),
     replaceTable(client, "purchase_items", snapshot.purchaseItems.map((i) => purchaseItemModelToRow(i, userId)), userId),
     replaceTable(client, "purchase_images", snapshot.purchaseImages.map((i) => purchaseImageModelToRow(i, userId)), userId),
+    replaceTable(client, "stores", snapshot.stores.map((s) => storeModelToRow(s, userId)), userId),
+    replaceTable(client, "affiliate_links", snapshot.affiliateLinks.map((l) => affiliateLinkModelToRow(l, userId)), userId),
     replaceTable(client, "sales", snapshot.sales.map((s) => saleModelToRow(s, userId)), userId),
     replaceTable(
       client,
@@ -468,5 +620,33 @@ export function nextPurchaseId(purchases: Purchase[]): number {
 
 export function nextItemId(items: PurchaseItem[]): number {
   return items.reduce((max, i) => Math.max(max, i.id), 0) + 1;
+}
+
+export function nextStoreId(stores: Store[]): number {
+  return stores.reduce((max, s) => Math.max(max, s.id), 0) + 1;
+}
+
+export function nextAffiliateLinkId(links: AffiliateLink[]): number {
+  return links.reduce((max, l) => Math.max(max, l.id), 0) + 1;
+}
+
+export function nextDeliveryId(rows: DeliveryRow[]): number {
+  return rows.reduce((max, r) => Math.max(max, r.id), 0) + 1;
+}
+
+export async function uploadStoreLogo(
+  client: SupabaseClient,
+  userId: string,
+  storeId: number,
+  file: Blob,
+  fileExt: string,
+): Promise<string> {
+  const path = `${userId}/store-${storeId}-${Date.now()}.${fileExt}`;
+  const { error: uploadError } = await client.storage
+    .from("stores")
+    .upload(path, file, { upsert: true, contentType: file.type || "image/png" });
+  if (uploadError) throw uploadError;
+  const { data } = client.storage.from("stores").getPublicUrl(path);
+  return data.publicUrl;
 }
 
