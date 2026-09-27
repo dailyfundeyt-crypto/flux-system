@@ -29,12 +29,14 @@ import {
   type DeliveryRow,
   type Purchase,
   type PurchaseBatch,
+  type PurchaseItem,
   type PurchaseLine,
   type RevenueLine,
   type Sale,
   type ShippingLine,
 } from "@/lib/supabase/snapshot";
 import type { SyncStatus } from "@/lib/supabase/types";
+import { AnkaufDashboard } from "@/components/purchase/ankauf-dashboard";
 import logoAsset from "@/assets/flux-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -59,6 +61,7 @@ function Index() {
   const auth = useAuth();
   const [active, setActive] = useState(0);
   const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [purchaseItems, setPurchaseItems] = useState<PurchaseItem[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [revenue, setRevenue] = useState<RevenueLine[]>([]);
   const [purchaseLines, setPurchaseLines] = useState<PurchaseLine[]>([]);
@@ -88,6 +91,7 @@ function Index() {
       try {
         const snapshot = await loadSnapshot(auth.client!, userId);
         setPurchases(snapshot.purchases);
+        setPurchaseItems(snapshot.purchaseItems);
         setSales(snapshot.sales);
         setRevenue(snapshot.revenueLines);
         setPurchaseLines(snapshot.purchaseLines);
@@ -107,6 +111,7 @@ function Index() {
   useEffect(() => {
     if (auth.status.kind === "signed_out") {
       setPurchases([]);
+      setPurchaseItems([]);
       setSales([]);
       setRevenue([]);
       setPurchaseLines([]);
@@ -129,6 +134,8 @@ function Index() {
     const timer = window.setTimeout(() => {
       void saveSnapshot(auth.client!, userId, {
         purchases,
+        purchaseItems,
+        purchaseImages: [],
         sales,
         purchaseLines,
         shippingLines,
@@ -146,7 +153,7 @@ function Index() {
         });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [purchases, sales, purchaseLines, shippingLines, revenue, purchaseBatches, deliveryRows, auth.client, auth.status, hydrated]);
+  }, [purchases, purchaseItems, sales, purchaseLines, shippingLines, revenue, purchaseBatches, deliveryRows, auth.client, auth.status, hydrated]);
 
   const goTo = (index: number) => {
     setActive(index);
@@ -163,6 +170,23 @@ function Index() {
   const flash = (message: string) => {
     setNotice(message);
     window.setTimeout(() => setNotice(""), 2600);
+  };
+
+  const formatTotalRevenue = (rows: Sale[]) => {
+    const total = rows.reduce((sum, s) => {
+      const n = Number(s.amount.replace(/[^\d,]/g, "").replace(",", "."));
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    return total.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
+  };
+
+  const formatAverageSale = (rows: Sale[]) => {
+    if (rows.length === 0) return "0,00 €";
+    const total = rows.reduce((sum, s) => {
+      const n = Number(s.amount.replace(/[^\d,]/g, "").replace(",", "."));
+      return sum + (Number.isFinite(n) ? n : 0);
+    }, 0);
+    return (total / rows.length).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
   };
 
   return (
@@ -218,28 +242,91 @@ function Index() {
       )}
 
       <div ref={scroller} onScroll={onScroll} className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <Page title="Ankauf" kicker="Beschaffung" subtitle="Einkäufe erfassen und Lieferanten im Blick behalten.">
-          <MetricGrid items={[
-            ["Einkaufswert", "3.810,00 €", "+8,4 %", <ArrowDownLeft />],
-            ["Bestellungen", "17", "diesen Monat", <Box />],
-            ["Ø Einkauf", "224,12 €", "pro Bestellung", <CircleDollarSign />],
-          ]} />
-          <ContentGrid>
-            <TradeForm mode="Ankauf" onAdd={(entry) => { setPurchases([entry, ...purchases]); flash("Ankauf wurde erfasst"); }} />
-            <EntryList title="Letzte Einkäufe" entries={purchases} icon={<ArrowDownLeft />} />
-          </ContentGrid>
+        <Page title="Ankauf" kicker="Beschaffung" subtitle="Einkäufe mit allen Items, Bildern, KI-Beschreibungen und Profit-Tracking.">
+          <AnkaufDashboard
+            purchases={purchases}
+            items={purchaseItems}
+            onPurchaseChange={setPurchases}
+            onItemChange={setPurchaseItems}
+            onSold={(item, salePrice, customerName) => {
+              const now = new Date();
+              const dateLabel = now.toLocaleString("de-DE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+              const sale: Sale = {
+                id: Date.now(),
+                customerName: customerName || "Unbenannt",
+                description: `${item.title || "Item"} · ${item.uniqueCode}`,
+                amount: `${salePrice.toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`,
+                time: dateLabel,
+                status: "open",
+              };
+              setSales([sale, ...sales]);
+              setPurchaseItems(
+                purchaseItems.map((it) =>
+                  it.id === item.id
+                    ? {
+                        ...it,
+                        status: "sold",
+                        soldAt: now.toISOString(),
+                        salePrice,
+                        saleOrderId: sale.id,
+                      }
+                    : it,
+                ),
+              );
+              flash(`Verkauft: ${item.uniqueCode} · ${sale.amount}`);
+            }}
+          />
         </Page>
 
-        <Page title="Verkauf" kicker="Aufträge" subtitle="Verkäufe schnell erfassen und Erträge verfolgen.">
+        <Page title="Verkauf" kicker="Aufträge" subtitle="Verkäufe, Kunden und Erlöse im Überblick — gefüllt aus dem Ankauf.">
           <MetricGrid items={[
-            ["Verkaufswert", "6.482,00 €", "+14,2 %", <ArrowUpRight />],
-            ["Aufträge", "23", "diesen Monat", <PackageCheck />],
-            ["Ø Verkauf", "281,83 €", "pro Auftrag", <CircleDollarSign />],
+            ["Verkaufserlös", formatTotalRevenue(sales), "aus Verkäufen", <ArrowUpRight />],
+            ["Verkäufe", `${sales.length}`, "insgesamt", <PackageCheck />],
+            ["Ø Verkauf", formatAverageSale(sales), "pro Auftrag", <CircleDollarSign />],
           ]} />
-          <ContentGrid>
-            <TradeForm mode="Verkauf" onAdd={(entry) => { setSales([entry, ...sales]); flash("Verkauf wurde erfasst"); }} />
-            <EntryList title="Letzte Verkäufe" entries={sales} icon={<ArrowUpRight />} />
-          </ContentGrid>
+          <div className="mt-8 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+            <div className="flex items-baseline justify-between border-b border-neutral-200 px-5 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-neutral-900">Verkäufe aus dem Ankauf</h3>
+                <p className="mt-0.5 text-xs text-neutral-500">Wenn du im Ankauf ein Item als „verkauft" markierst, erscheint es hier automatisch.</p>
+              </div>
+              <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold text-neutral-600">
+                {sales.length} Verkäufe
+              </span>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                  <th className="px-4 py-3">Kunde</th>
+                  <th className="px-4 py-3">Position</th>
+                  <th className="px-4 py-3 w-32 text-right">Betrag</th>
+                  <th className="px-4 py-3 w-32">Zeit</th>
+                  <th className="px-4 py-3 w-28">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sales.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-400">
+                    Noch keine Verkäufe. Markiere im Ankauf ein Item als verkauft.
+                  </td></tr>
+                ) : (
+                  sales.map((s) => (
+                    <tr key={s.id} className="border-b border-neutral-100 last:border-0">
+                      <td className="px-4 py-3 text-sm font-medium text-neutral-800">{s.customerName}</td>
+                      <td className="px-4 py-3 text-sm text-neutral-500">{s.description}</td>
+                      <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">{s.amount}</td>
+                      <td className="px-4 py-3 text-xs text-neutral-500">{s.time}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${s.status === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-blue-50 text-blue-700"}`}>
+                          {s.status === "open" ? "Offen" : s.status === "paid" ? "Bezahlt" : s.status === "shipped" ? "Versendet" : "Abgeschlossen"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </Page>
 
         <section className="w-full shrink-0 snap-start bg-white px-4 py-8 text-neutral-900 sm:px-8 sm:py-12">
@@ -690,7 +777,7 @@ function RevenueWorkspace({
   onShippingLinesChange: (rows: ShippingLine[]) => void;
   revenue: RevenueLine[];
   onRevenueChange: (rows: RevenueLine[]) => void;
-  sales: Entry[];
+  sales: Sale[];
   batches: PurchaseBatch[];
   onBatchesChange: (rows: PurchaseBatch[]) => void;
 }) {
@@ -709,8 +796,8 @@ function RevenueWorkspace({
   const pendingRows: RevenueRow[] = sales.map((entry, i) => ({
     kind: "pending" as const,
     id: 50_000 + i,
-    name: entry.name,
-    detail: entry.detail,
+    name: entry.customerName,
+    detail: entry.description,
     amount: entry.amount,
   }));
 
