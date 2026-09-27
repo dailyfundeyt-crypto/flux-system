@@ -142,17 +142,16 @@ function Index() {
           </ContentGrid>
         </Page>
 
-        <Page title="Lieferung" kicker="Logistik" subtitle="Sendungen planen und ihren Status aktualisieren.">
-          <MetricGrid items={[
-            ["Unterwegs", "4", "aktive Touren", <Truck />],
-            ["Heute", "7", "Lieferungen", <Clock3 />],
-            ["Pünktlich", "96 %", "+2,1 %", <PackageCheck />],
-          ]} />
-          <ContentGrid>
-            <DeliveryForm onAdd={(entry) => { setDeliveries([entry, ...deliveries]); flash("Lieferung wurde geplant"); }} />
-            <EntryList title="Anstehende Lieferungen" entries={deliveries} icon={<Truck />} status />
-          </ContentGrid>
-        </Page>
+        <section className="w-full shrink-0 snap-start bg-white px-4 py-8 text-neutral-900 sm:px-8 sm:py-12">
+          <div className="mx-auto max-w-5xl">
+            <p className="text-xs font-semibold uppercase text-neutral-400">Logistik</p>
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Lieferung</h1>
+            <p className="mt-2 text-sm text-neutral-500">Kartons, QR-Codes und Rechnungen in einer Tabelle.</p>
+            <div className="mt-8">
+              <DeliveryTable />
+            </div>
+          </div>
+        </section>
 
         <Page title="Umsatz" kicker="Finanzen" subtitle="Entwicklung, Marge und Buchungen auf einen Blick.">
           <MetricGrid items={[
