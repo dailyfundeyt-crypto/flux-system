@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+﻿import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
   ArrowDownLeft,
@@ -706,14 +706,16 @@ type RevenueRow =
       label: string;
       purchaseIds: number[];
       revenueIds: number[];
-    };
+    }
+  | { kind: "pending"; id: number; name: string; detail: string; amount: string };
 
-const revenueBadgeStyles: Record<RevenueRow["kind"], { label: string; className: string }> = {
+const revenueBadgeStyles = {
   purchase: { label: "Ankauf", className: "bg-rose-50 text-rose-700" },
   shipping: { label: "Versand", className: "bg-amber-50 text-amber-700" },
   revenue: { label: "Umsatz", className: "bg-emerald-50 text-emerald-700" },
   batch: { label: "Einkauf-Batch", className: "bg-indigo-50 text-indigo-700" },
-};
+  pending: { label: "Offen", className: "bg-blue-50 text-blue-700" },
+} as const satisfies Record<string, { label: string; className: string }>;
 
 function RevenueWorkspace({
   purchaseLines,
@@ -747,7 +749,14 @@ function RevenueWorkspace({
   const cost = purchaseTotal + shippingTotal;
   const profit = revenueTotal - cost;
   const margin = revenueTotal > 0 ? (profit / revenueTotal) * 100 : 0;
-  const pendingSalesCount = sales.length;
+
+  const pendingRows: RevenueRow[] = sales.map((entry, i) => ({
+    kind: "pending" as const,
+    id: 50_000 + i,
+    name: entry.name,
+    detail: entry.detail,
+    amount: entry.amount,
+  }));
 
   const unifiedRows: RevenueRow[] = [
     ...purchaseLines.map<RevenueRow>((line) => ({ kind: "purchase", id: line.id, label: line.label, amount: line.amount })),
@@ -760,6 +769,7 @@ function RevenueWorkspace({
       purchaseIds: batch.purchaseIds,
       revenueIds: batch.revenueIds,
     })),
+    ...pendingRows,
   ];
 
   const updateRow = (row: RevenueRow, patch: Partial<RevenueRow>) => {
@@ -801,6 +811,8 @@ function RevenueWorkspace({
       case "batch":
         onBatchesChange(batches.filter((batch) => batch.id !== row.id));
         return;
+      case "pending":
+        return;
     }
   };
 
@@ -832,7 +844,6 @@ function RevenueWorkspace({
         shippingTotal={shippingTotal}
         profit={profit}
         margin={margin}
-        pendingSales={pendingSalesCount}
       />
 
       <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
@@ -840,7 +851,7 @@ function RevenueWorkspace({
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-neutral-900">Umsatz-Tabelle</h3>
             <p className="mt-0.5 text-xs text-neutral-500">
-              Eine flache Tabelle für alle Positionen: Ankäufe, Versand, Umsätze und Einkauf-Batches. Wie auf der Lieferung-Seite.
+              Eine flache Tabelle für alle Positionen: Ankäufe, Versand, Umsätze und Einkauf-Batches. Offene Aufträge erscheinen mit Status „Offen".
             </p>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -864,6 +875,7 @@ function RevenueWorkspace({
             {unifiedRows.map((row) => {
               const badge = revenueBadgeStyles[row.kind];
               const isBatch = row.kind === "batch";
+              const isPending = row.kind === "pending";
               const batchCost = isBatch
                 ? row.purchaseIds.reduce((sum, id) => sum + (lookupPurchase(id)?.amount ?? 0), 0)
                 : 0;
@@ -879,21 +891,28 @@ function RevenueWorkspace({
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <input
-                      value={row.label}
-                      onChange={(event) => updateRow(row, { label: event.target.value } as Partial<RevenueRow>)}
-                      placeholder={
-                        row.kind === "purchase" ? "Lieferant oder Position" :
-                        row.kind === "shipping" ? "Carrier oder Sendung" :
-                        row.kind === "revenue" ? "Store oder Kunde" :
-                        "Einkauf-Name"
-                      }
-                      aria-label="Bezeichnung"
-                      className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white ${row.kind === "batch" ? "font-semibold" : ""}`}
-                    />
+                    {isPending ? (
+                      <div>
+                        <p className="text-sm font-medium text-neutral-800">{row.name}</p>
+                        <p className="text-xs text-neutral-400">{row.detail}</p>
+                      </div>
+                    ) : (
+                      <input
+                        value={row.label}
+                        onChange={(event) => updateRow(row, { label: event.target.value } as Partial<RevenueRow>)}
+                        placeholder={
+                          row.kind === "purchase" ? "Lieferant oder Position" :
+                          row.kind === "shipping" ? "Carrier oder Sendung" :
+                          row.kind === "revenue" ? "Store oder Kunde" :
+                          "Einkauf-Name"
+                        }
+                        aria-label="Bezeichnung"
+                        className={`w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white ${row.kind === "batch" ? "font-semibold" : ""}`}
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-3">
-                    {row.kind === "batch" ? (
+                    {isBatch ? (
                       <BatchAssigner
                         batch={row}
                         purchaseLines={purchaseLines}
@@ -905,7 +924,7 @@ function RevenueWorkspace({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    {row.kind === "batch" ? (
+                    {isBatch ? (
                       <div className="flex flex-col items-end gap-0.5">
                         <span className="text-sm font-semibold tabular-nums">{eur(batchCost)}</span>
                         <span
@@ -914,6 +933,8 @@ function RevenueWorkspace({
                           {eur(batchReturn)} · {(ratio * 100).toFixed(0)} % refinanziert
                         </span>
                       </div>
+                    ) : isPending ? (
+                      <span className="text-sm font-semibold tabular-nums text-neutral-500">{row.amount}</span>
                     ) : (
                       <input
                         type="number"
@@ -927,14 +948,16 @@ function RevenueWorkspace({
                     )}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => removeRow(row)}
-                      className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                      aria-label="Zeile entfernen"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    {!isPending && (
+                      <button
+                        type="button"
+                        onClick={() => removeRow(row)}
+                        className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                        aria-label="Zeile entfernen"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
@@ -942,7 +965,7 @@ function RevenueWorkspace({
             {unifiedRows.length === 0 && (
               <tr>
                 <td colSpan={5} className="px-4 py-10 text-center text-sm text-neutral-400">
-                  Noch keine Positionen erfasst. Lege oben einen ersten Ankauf, Versand oder Umsatz an.
+                  Noch keine Positionen erfasst. Offene Aufträge aus dem Verkauf-Tab erscheinen automatisch hier mit dem Status „Offen".
                 </td>
               </tr>
             )}
@@ -975,58 +998,6 @@ function RevenueWorkspace({
           </tfoot>
         </table>
       </div>
-
-      {sales.length > 0 && (
-        <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
-            <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-neutral-900">Verkäufe aus dem Verkauf-Tab</h3>
-              <p className="mt-0.5 text-xs text-neutral-500">
-                Diese Aufträge sind im Verkauf-Tab erfasst. Übertrage sie hier in die Umsatz-Tabelle, um sie in den Gesamt-Verkauf einzurechnen.
-              </p>
-            </div>
-            <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold text-neutral-600">
-              {pendingSalesCount} offen
-            </span>
-          </div>
-          <table className="w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-                <th className="px-4 py-3">Kunde</th>
-                <th className="px-4 py-3">Position</th>
-                <th className="px-4 py-3 w-32 text-right">Betrag</th>
-                <th className="px-4 py-3 w-40 text-right">Aktion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sales.map((entry, index) => {
-                const amountNumber = Number(entry.amount.replace(/[^\d,]/g, "").replace(",", "."));
-                return (
-                  <tr key={`${entry.name}-${index}`} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
-                    <td className="px-4 py-3 text-sm font-medium text-neutral-800">{entry.name}</td>
-                    <td className="px-4 py-3 text-sm text-neutral-500">{entry.detail}</td>
-                    <td className="px-4 py-3 text-right text-sm font-semibold tabular-nums">{entry.amount}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (Number.isFinite(amountNumber) && amountNumber > 0) {
-                            const id = nextRevenueId.current++;
-                            onRevenueChange([...revenue, { id, store: entry.name, amount: amountNumber }]);
-                          }
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-900 hover:text-white hover:border-neutral-900"
-                      >
-                        <Plus className="h-3.5 w-3.5" /> Als Umsatz übernehmen
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
     </div>
   );
 }
@@ -1140,14 +1111,12 @@ function RevenueSummaryStrip({
   shippingTotal,
   profit,
   margin,
-  pendingSales,
 }: {
   revenue: number;
   purchaseTotal: number;
   shippingTotal: number;
   profit: number;
   margin: number;
-  pendingSales: number;
 }) {
   const isPositive = profit >= 0;
   return (
@@ -1163,11 +1132,6 @@ function RevenueSummaryStrip({
           >
             {isPositive ? "Gewinn" : "Verlust"} {eur(Math.abs(profit))} · {margin.toFixed(1)} % Marge
           </span>
-          {pendingSales > 0 && (
-            <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600">
-              {pendingSales} Verkäufe noch nicht in Umsätze übernommen
-            </span>
-          )}
         </div>
       </div>
       <table className="w-full text-left text-sm">
