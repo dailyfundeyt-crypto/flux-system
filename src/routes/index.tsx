@@ -13,6 +13,7 @@ import {
   PackageCheck,
   Plus,
   QrCode,
+  Settings,
   Trash2,
   TrendingUp,
   UserRound,
@@ -20,6 +21,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SettingsPanel } from "@/components/settings/settings-panel";
+import { buildClient, loadCredentials } from "@/lib/supabase/client";
+import { loadSnapshot, saveSnapshot } from "@/lib/supabase/snapshot";
+import type { SupabaseCredentials, SyncStatus, WorkspaceSnapshot } from "@/lib/supabase/types";
 import logoAsset from "@/assets/flux-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -83,6 +88,11 @@ const initialPurchaseBatches: PurchaseBatch[] = [
   { id: 3, label: "Einkauf 3", purchaseIds: [3], revenueIds: [3, 5] },
 ];
 
+const initialDeliveryRows: DeliveryRow[] = [
+  { id: 1, box: "1", qr: null, invoice: null },
+  { id: 2, box: "2", qr: null, invoice: null },
+];
+
 function Index() {
   const [active, setActive] = useState(0);
   const [purchases, setPurchases] = useState(initialPurchases);
@@ -91,8 +101,82 @@ function Index() {
   const [purchaseLines, setPurchaseLines] = useState(initialPurchaseLines);
   const [shippingLines, setShippingLines] = useState(initialShippingLines);
   const [purchaseBatches, setPurchaseBatches] = useState(initialPurchaseBatches);
+  const [deliveryRows, setDeliveryRows] = useState(initialDeliveryRows);
   const [notice, setNotice] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ kind: "idle" });
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [supabaseCreds, setSupabaseCreds] = useState<SupabaseCredentials | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
+  const hydratedRef = useRef(false);
+
+  // Initial Supabase hydration + connection (only once on mount)
+  useEffect(() => {
+    const creds = loadCredentials();
+    if (!creds) return;
+    setSupabaseCreds(creds);
+    setSyncStatus({ kind: "loading" });
+    const client = buildClient(creds);
+    void (async () => {
+      try {
+        const snapshot = await loadSnapshot(client);
+        if (snapshot) {
+          setPurchases(snapshot.purchases);
+          setSales(snapshot.sales);
+          setRevenue(snapshot.revenue);
+          setPurchaseLines(snapshot.purchaseLines);
+          setShippingLines(snapshot.shippingLines);
+          setPurchaseBatches(snapshot.purchaseBatches);
+          if (snapshot.deliveryRows.length > 0) setDeliveryRows(snapshot.deliveryRows);
+        }
+        setSyncStatus({ kind: "ready", at: Date.now() });
+      } catch (err) {
+        setSyncStatus({ kind: "error", message: err instanceof Error ? err.message : "Unbekannter Fehler" });
+      } finally {
+        hydratedRef.current = true;
+      }
+    })();
+  }, []);
+
+  // Debounced auto-sync on state changes
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (!supabaseCreds) return;
+    if (!supabaseCreds.autoSync) return;
+    setSyncStatus({ kind: "loading" });
+    const timer = window.setTimeout(() => {
+      const snapshot: WorkspaceSnapshot = {
+        schemaVersion: 1,
+        purchases,
+        sales,
+        revenue,
+        purchaseLines,
+        shippingLines,
+        purchaseBatches,
+        deliveryRows,
+      };
+      const client = buildClient(supabaseCreds);
+      void saveSnapshot(client, snapshot)
+        .then(() => {
+          const at = Date.now();
+          setLastSavedAt(at);
+          setSyncStatus({ kind: "ready", at });
+        })
+        .catch((err: unknown) => {
+          setSyncStatus({ kind: "error", message: err instanceof Error ? err.message : "Unbekannter Fehler" });
+        });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    purchases,
+    sales,
+    revenue,
+    purchaseLines,
+    shippingLines,
+    purchaseBatches,
+    deliveryRows,
+    supabaseCreds,
+  ]);
 
   const goTo = (index: number) => {
     setActive(index);
@@ -151,6 +235,31 @@ function Index() {
         </div>
       )}
 
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="Einstellungen öffnen"
+        className="fixed bottom-4 left-4 z-30 grid h-11 w-11 place-items-center rounded-full bg-white text-neutral-700 shadow-lg ring-1 ring-neutral-200 transition-colors hover:bg-neutral-900 hover:text-white hover:ring-neutral-900 sm:bottom-6 sm:left-6"
+      >
+        <Settings className="h-4 w-4" />
+      </button>
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        status={syncStatus}
+        onSaved={(creds) => {
+          setSupabaseCreds(creds);
+          setSyncStatus({ kind: "ready", at: Date.now() });
+        }}
+        onCleared={() => {
+          setSupabaseCreds(null);
+          setSyncStatus({ kind: "idle" });
+          setLastSavedAt(null);
+        }}
+        lastSavedAt={lastSavedAt}
+      />
+
       <div ref={scroller} onScroll={onScroll} className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <Page title="Ankauf" kicker="Beschaffung" subtitle="Einkäufe erfassen und Lieferanten im Blick behalten.">
           <MetricGrid items={[
@@ -182,7 +291,7 @@ function Index() {
             <h1 className="mt-2 text-3xl font-bold sm:text-4xl">Lieferung</h1>
             <p className="mt-2 text-sm text-neutral-500">Kartons, QR-Codes und Rechnungen in einer Tabelle.</p>
             <div className="mt-8">
-              <DeliveryTable />
+              <DeliveryTable rows={deliveryRows} onRowsChange={setDeliveryRows} />
             </div>
           </div>
         </section>
@@ -296,21 +405,17 @@ function readFile(file: File): Promise<DeliveryFile> {
   });
 }
 
-function DeliveryTable() {
-  const [rows, setRows] = useState<DeliveryRow[]>([
-    { id: 1, box: "1", qr: null, invoice: null },
-    { id: 2, box: "2", qr: null, invoice: null },
-  ]);
-  const nextId = useRef(3);
+function DeliveryTable({ rows, onRowsChange }: { rows: DeliveryRow[]; onRowsChange: (next: DeliveryRow[]) => void }) {
+  const nextId = useRef(rows.length + 100);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   const update = (id: number, patch: Partial<DeliveryRow>) =>
-    setRows((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    onRowsChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
 
   const addRow = () =>
-    setRows((current) => [...current, { id: nextId.current++, box: String(current.length + 1), qr: null, invoice: null }]);
+    onRowsChange([...rows, { id: nextId.current++, box: String(rows.length + 1), qr: null, invoice: null }]);
   const removeRow = (id: number) =>
-    setRows((current) => current.filter((row) => row.id !== id));
+    onRowsChange(rows.filter((row) => row.id !== id));
 
   const pickFile = async (id: number, kind: "qr" | "invoice") => {
     const input = document.createElement("input");
