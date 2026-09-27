@@ -86,7 +86,7 @@ function Index() {
               <img src={logoAsset.url} alt="Flux" className="h-11 w-11 shrink-0 rounded-xl object-cover shadow-sm" />
               <div className="min-w-0">
                 <p className="truncate text-xl font-bold">Flux</p>
-                <p className="truncate text-xs text-muted-foreground">Logistik ohne Umwege</p>
+                <p className="truncate text-xs text-muted-foreground">Logistik ohne Interface</p>
               </div>
             </div>
           </div>
