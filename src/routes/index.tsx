@@ -13,7 +13,6 @@ import {
   PackageCheck,
   Plus,
   QrCode,
-  Settings,
   Trash2,
   TrendingUp,
   UserRound,
@@ -235,17 +234,9 @@ function Index() {
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setSettingsOpen(true)}
-        aria-label="Einstellungen öffnen"
-        className="fixed bottom-4 left-4 z-30 grid h-11 w-11 place-items-center rounded-full bg-white text-neutral-700 shadow-lg ring-1 ring-neutral-200 transition-colors hover:bg-neutral-900 hover:text-white hover:ring-neutral-900 sm:bottom-6 sm:left-6"
-      >
-        <Settings className="h-4 w-4" />
-      </button>
-
       <SettingsPanel
         open={settingsOpen}
+        onOpen={() => setSettingsOpen(true)}
         onClose={() => setSettingsOpen(false)}
         status={syncStatus}
         onSaved={(creds) => {
