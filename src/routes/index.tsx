@@ -308,6 +308,7 @@ function Index() {
               onShippingLinesChange={setShippingLines}
               revenue={revenue}
               onRevenueChange={setRevenue}
+              sales={sales}
               batches={purchaseBatches}
               onBatchesChange={setPurchaseBatches}
             />
@@ -702,6 +703,7 @@ function RevenueWorkspace({
   onShippingLinesChange,
   revenue,
   onRevenueChange,
+  sales,
   batches,
   onBatchesChange,
 }: {
@@ -711,6 +713,7 @@ function RevenueWorkspace({
   onShippingLinesChange: (rows: MoneyLine[]) => void;
   revenue: RevenueLine[];
   onRevenueChange: (rows: RevenueLine[]) => void;
+  sales: Entry[];
   batches: PurchaseBatch[];
   onBatchesChange: (rows: PurchaseBatch[]) => void;
 }) {
@@ -722,6 +725,16 @@ function RevenueWorkspace({
   const purchaseTotal = purchaseLines.reduce((sum, line) => sum + line.amount, 0);
   const shippingTotal = shippingLines.reduce((sum, line) => sum + line.amount, 0);
   const revenueTotal = revenue.reduce((sum, line) => sum + line.amount, 0);
+  const cost = purchaseTotal + shippingTotal;
+  const profit = revenueTotal - cost;
+  const margin = revenueTotal > 0 ? (profit / revenueTotal) * 100 : 0;
+  const pendingSalesCount = sales.length;
+  const unassignedRevenue = revenue.filter((line) => !batches.some((batch) => batch.revenueIds.includes(line.id)));
+  const unassignedPurchases = purchaseLines.filter((line) => !batches.some((batch) => batch.purchaseIds.includes(line.id)));
+  const unassignedRevenueTotal = unassignedRevenue.reduce((sum, line) => sum + line.amount, 0);
+  const unassignedPurchaseTotal = unassignedPurchases.reduce((sum, line) => sum + line.amount, 0);
+  const assignedRevenueTotal = revenueTotal - unassignedRevenueTotal;
+  const assignedPurchaseTotal = purchaseTotal - unassignedPurchaseTotal;
 
   const updateLine = <T extends MoneyLine>(
     rows: T[],
@@ -729,6 +742,9 @@ function RevenueWorkspace({
     id: number,
     patch: Partial<T>,
   ) => setter(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+
+  const removeLine = <T extends { id: number }>(rows: T[], setter: (next: T[]) => void, id: number) =>
+    setter(rows.filter((row) => row.id !== id));
 
   const addPurchaseLine = () => {
     const id = nextPurchaseId.current++;
@@ -755,206 +771,79 @@ function RevenueWorkspace({
 
   return (
     <div className="mt-8 space-y-6">
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <RevenueSummary label="Ankäufe gesamt" value={eur(purchaseTotal)} accent="neutral" />
-        <RevenueSummary label="Versand gesamt" value={eur(shippingTotal)} accent="neutral" />
-        <RevenueSummary
-          label="Umsatz gesamt"
-          value={eur(revenueTotal)}
-          accent="positive"
-          delta={`Marge ${(((revenueTotal - purchaseTotal - shippingTotal) / Math.max(revenueTotal, 1)) * 100).toFixed(1)} %`}
-        />
-      </div>
+      <RevenueBreakdown
+        revenue={revenueTotal}
+        cost={cost}
+        purchaseTotal={purchaseTotal}
+        shippingTotal={shippingTotal}
+        profit={profit}
+        margin={margin}
+        pendingSales={pendingSalesCount}
+        assignedRevenueTotal={assignedRevenueTotal}
+        unassignedRevenueTotal={unassignedRevenueTotal}
+        assignedPurchaseTotal={assignedPurchaseTotal}
+        unassignedPurchaseTotal={unassignedPurchaseTotal}
+      />
+
+      <RevenueTableCard
+        title="Alle Ankäufe"
+        rows={purchaseLines}
+        onChange={onPurchaseLinesChange}
+        onAdd={addPurchaseLine}
+        addLabel="Neuer Ankauf"
+        sumLabel="Summe Ankäufe"
+        total={purchaseTotal}
+        update={(id, patch) => updateLine(purchaseLines, onPurchaseLinesChange, id, patch as Partial<MoneyLine>)}
+        remove={(id) => removeLine(purchaseLines, onPurchaseLinesChange, id)}
+        getLabel={(row) => (row as MoneyLine).label}
+        setLabel={(_row, value) => ({ label: value } as Partial<MoneyLine>)}
+      />
+
+      <RevenueTableCard
+        title="Versandkosten"
+        rows={shippingLines}
+        onChange={onShippingLinesChange}
+        onAdd={addShippingLine}
+        addLabel="Neue Versandposition"
+        sumLabel="Summe Versand"
+        total={shippingTotal}
+        update={(id, patch) => updateLine(shippingLines, onShippingLinesChange, id, patch as Partial<MoneyLine>)}
+        remove={(id) => removeLine(shippingLines, onShippingLinesChange, id)}
+        getLabel={(row) => (row as MoneyLine).label}
+        setLabel={(_row, value) => ({ label: value } as Partial<MoneyLine>)}
+      />
+
+      <RevenueTableCard
+        title="Umsätze"
+        rows={revenue}
+        onChange={onRevenueChange as (rows: RevenueLine[]) => void}
+        onAdd={addRevenueLine}
+        addLabel="Neuer Umsatz"
+        sumLabel="Summe Umsätze"
+        total={revenueTotal}
+        update={(id, patch) => onRevenueChange(revenue.map((row) => (row.id === id ? { ...row, ...(patch as Partial<RevenueLine>) } : row)))}
+        remove={(id) => removeLine(revenue, onRevenueChange as (rows: RevenueLine[]) => void, id)}
+        getLabel={(row) => (row as RevenueLine).store}
+        setLabel={(_row, value) => ({ store: value } as Partial<RevenueLine>)}
+      />
 
       <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+        <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-neutral-900">Einkauf-Rentabilität</h3>
+            <p className="mt-0.5 text-xs text-neutral-500">
+              Ordne Ankäufe und Umsätze zu, um zu sehen, wie viel vom eingesetzten Geld bereits zurückgeflossen ist.
+            </p>
+          </div>
+        </div>
         <table className="w-full text-left text-sm">
           <thead>
             <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              <th className="px-4 py-3">Alle Ankäufe</th>
-              <th className="px-4 py-3 w-32 text-right">Betrag</th>
-              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {purchaseLines.map((line) => (
-              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
-                <td className="px-4 py-2.5">
-                  <input
-                    value={line.label}
-                    onChange={(event) => updateLine(purchaseLines, onPurchaseLinesChange, line.id, { label: event.target.value })}
-                    placeholder="Lieferant oder Position"
-                    aria-label="Ankauf-Bezeichnung"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={line.amount}
-                    onChange={(event) => updateLine(purchaseLines, onPurchaseLinesChange, line.id, { amount: Number(event.target.value) || 0 })}
-                    aria-label="Ankauf-Betrag"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  <button
-                    type="button"
-                    onClick={() => onPurchaseLinesChange(purchaseLines.filter((row) => row.id !== line.id))}
-                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                    aria-label="Ankauf entfernen"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t border-neutral-200 bg-neutral-50">
-              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Ankäufe</td>
-              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(purchaseTotal)}</td>
-              <td />
-            </tr>
-          </tbody>
-        </table>
-        <button
-          type="button"
-          onClick={addPurchaseLine}
-          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
-        >
-          <Plus className="h-4 w-4" /> Neuer Ankauf
-        </button>
-      </div>
-
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              <th className="px-4 py-3">Versandkosten</th>
-              <th className="px-4 py-3 w-32 text-right">Betrag</th>
-              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {shippingLines.map((line) => (
-              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
-                <td className="px-4 py-2.5">
-                  <input
-                    value={line.label}
-                    onChange={(event) => updateLine(shippingLines, onShippingLinesChange, line.id, { label: event.target.value })}
-                    placeholder="Carrier oder Sendung"
-                    aria-label="Versand-Bezeichnung"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={line.amount}
-                    onChange={(event) => updateLine(shippingLines, onShippingLinesChange, line.id, { amount: Number(event.target.value) || 0 })}
-                    aria-label="Versand-Betrag"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  <button
-                    type="button"
-                    onClick={() => onShippingLinesChange(shippingLines.filter((row) => row.id !== line.id))}
-                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                    aria-label="Versandposition entfernen"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t border-neutral-200 bg-neutral-50">
-              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Versand</td>
-              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(shippingTotal)}</td>
-              <td />
-            </tr>
-          </tbody>
-        </table>
-        <button
-          type="button"
-          onClick={addShippingLine}
-          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
-        >
-          <Plus className="h-4 w-4" /> Neue Versandposition
-        </button>
-      </div>
-
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              <th className="px-4 py-3">Umsätze</th>
-              <th className="px-4 py-3 w-32 text-right">Betrag</th>
-              <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            {revenue.map((line) => (
-              <tr key={line.id} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
-                <td className="px-4 py-2.5">
-                  <input
-                    value={line.store}
-                    onChange={(event) => onRevenueChange(revenue.map((row) => (row.id === line.id ? { ...row, store: event.target.value } : row)))}
-                    placeholder="Store oder Kunde"
-                    aria-label="Umsatz-Bezeichnung"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5">
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={line.amount}
-                    onChange={(event) => onRevenueChange(revenue.map((row) => (row.id === line.id ? { ...row, amount: Number(event.target.value) || 0 } : row)))}
-                    aria-label="Umsatz-Betrag"
-                    className="w-full rounded border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
-                  />
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  <button
-                    type="button"
-                    onClick={() => onRevenueChange(revenue.filter((row) => row.id !== line.id))}
-                    className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
-                    aria-label="Umsatz entfernen"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            <tr className="border-t border-neutral-200 bg-neutral-50">
-              <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">Summe Umsätze</td>
-              <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(revenueTotal)}</td>
-              <td />
-            </tr>
-          </tbody>
-        </table>
-        <button
-          type="button"
-          onClick={addRevenueLine}
-          className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
-        >
-          <Plus className="h-4 w-4" /> Neuer Umsatz
-        </button>
-      </div>
-
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead>
-            <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
-              <th className="px-4 py-3">Einkauf</th>
+              <th className="px-4 py-3 w-32">Einkauf</th>
               <th className="px-4 py-3">Zugeordnete Ankäufe</th>
               <th className="px-4 py-3">Zugeordnete Umsätze</th>
-              <th className="px-4 py-3 w-32 text-right">Erlös</th>
-              <th className="px-4 py-3 w-32 text-right">Davon zurück</th>
+              <th className="px-4 py-3 w-32 text-right">Einsatz</th>
+              <th className="px-4 py-3 w-36 text-right">Davon zurück</th>
               <th className="px-4 py-3 w-16"><span className="sr-only">Aktion</span></th>
             </tr>
           </thead>
@@ -963,6 +852,7 @@ function RevenueWorkspace({
               const batchCost = batch.purchaseIds.reduce((sum, id) => sum + (lookupPurchase(id)?.amount ?? 0), 0);
               const batchReturn = batch.revenueIds.reduce((sum, id) => sum + (lookupRevenue(id)?.amount ?? 0), 0);
               const ratio = batchCost > 0 ? batchReturn / batchCost : 0;
+              const remaining = batchReturn - batchCost;
               return (
                 <tr key={batch.id} className="border-b border-neutral-100 align-top transition-colors last:border-0 hover:bg-neutral-50">
                   <td className="px-4 py-2.5">
@@ -970,7 +860,7 @@ function RevenueWorkspace({
                       value={batch.label}
                       onChange={(event) => updateBatch(batch.id, { label: event.target.value })}
                       aria-label="Einkauf-Name"
-                      className="w-32 rounded border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:border-neutral-300 focus:bg-white"
+                      className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm font-semibold outline-none focus:border-neutral-300 focus:bg-white"
                     />
                   </td>
                   <td className="px-4 py-2.5">
@@ -996,7 +886,7 @@ function RevenueWorkspace({
                   <td className="px-4 py-2.5 text-right text-sm font-semibold tabular-nums">{eur(batchCost)}</td>
                   <td className="px-4 py-2.5 text-right">
                     <div className="flex flex-col items-end gap-1">
-                      <span className="text-sm font-semibold tabular-nums">{eur(batchReturn)}</span>
+                      <span className={`text-sm font-semibold tabular-nums ${remaining >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{eur(batchReturn)}</span>
                       <span
                         className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${ratio >= 1 ? "bg-emerald-50 text-emerald-700" : ratio >= 0.5 ? "bg-amber-50 text-amber-700" : "bg-rose-50 text-rose-700"}`}
                       >
@@ -1022,6 +912,14 @@ function RevenueWorkspace({
                 <td colSpan={6} className="px-4 py-8 text-center text-sm text-neutral-400">Noch keine Einkäufe zusammengefasst.</td>
               </tr>
             )}
+            {batches.length > 0 && (
+              <tr className="border-t border-neutral-200 bg-neutral-50">
+                <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500" colSpan={3}>Zugeordnet gesamt</td>
+                <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(assignedPurchaseTotal)}</td>
+                <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums text-emerald-700">{eur(assignedRevenueTotal)}</td>
+                <td />
+              </tr>
+            )}
           </tbody>
         </table>
         <button
@@ -1032,6 +930,245 @@ function RevenueWorkspace({
           <Plus className="h-4 w-4" /> Neuer Einkauf-Batch
         </button>
       </div>
+
+      {sales.length > 0 && (
+        <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+            <div className="min-w-0">
+              <h3 className="text-sm font-semibold text-neutral-900">Verkäufe aus dem Verkauf-Tab</h3>
+              <p className="mt-0.5 text-xs text-neutral-500">
+                Diese Aufträge sind im Verkauf-Tab erfasst. Übertrage sie hier in die Umsatz-Tabelle, um sie in den Gesamt-Verkauf einzurechnen.
+              </p>
+            </div>
+            <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-semibold text-neutral-600">
+              {pendingSalesCount} offen
+            </span>
+          </div>
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-neutral-200 text-xs font-medium uppercase tracking-wide text-neutral-400">
+                <th className="px-4 py-3">Kunde</th>
+                <th className="px-4 py-3">Position</th>
+                <th className="px-4 py-3 w-32 text-right">Betrag</th>
+                <th className="px-4 py-3 w-40 text-right">Aktion</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sales.map((entry, index) => {
+                const amountNumber = Number(entry.amount.replace(/[^\d,]/g, "").replace(",", "."));
+                return (
+                  <tr key={`${entry.name}-${index}`} className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50">
+                    <td className="px-4 py-2.5 text-sm font-medium text-neutral-800">{entry.name}</td>
+                    <td className="px-4 py-2.5 text-sm text-neutral-500">{entry.detail}</td>
+                    <td className="px-4 py-2.5 text-right text-sm font-semibold tabular-nums">{entry.amount}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (Number.isFinite(amountNumber) && amountNumber > 0) {
+                            const id = nextRevenueId.current++;
+                            onRevenueChange([...revenue, { id, store: entry.name, amount: amountNumber }]);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1.5 rounded-md border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 transition-colors hover:bg-neutral-900 hover:text-white hover:border-neutral-900"
+                      >
+                        <Plus className="h-3.5 w-3.5" /> Als Umsatz übernehmen
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RevenueTableCard<T extends { id: number; amount: number }>({
+  title,
+  rows,
+  total,
+  sumLabel,
+  addLabel,
+  onAdd,
+  onChange: _onChange,
+  update,
+  remove,
+  getLabel,
+  setLabel,
+}: {
+  title: string;
+  rows: T[];
+  total: number;
+  sumLabel: string;
+  addLabel: string;
+  onAdd: () => void;
+  onChange: (rows: T[]) => void;
+  update: (id: number, patch: Partial<T>) => void;
+  remove: (id: number) => void;
+  getLabel: (row: T) => string;
+  setLabel: (row: T, value: string) => Partial<T>;
+}) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between border-b border-neutral-200 px-4 py-3">
+        <h3 className="text-sm font-semibold text-neutral-900">{title}</h3>
+      </div>
+      <table className="w-full text-left text-sm">
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.id}
+              className="border-b border-neutral-100 transition-colors last:border-0 hover:bg-neutral-50"
+            >
+              <td className="px-4 py-2.5">
+                <input
+                  value={getLabel(row)}
+                  onChange={(event) => update(row.id, setLabel(row, event.target.value) as Partial<T>)}
+                  placeholder={title.includes("Versand") ? "Carrier oder Sendung" : title.includes("Umsatz") ? "Store oder Kunde" : "Lieferant oder Position"}
+                  aria-label={`${title}-Bezeichnung`}
+                  className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-sm outline-none focus:border-neutral-300 focus:bg-white"
+                />
+              </td>
+              <td className="px-4 py-2.5 w-40">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={row.amount}
+                  onChange={(event) => update(row.id, { amount: Number(event.target.value) || 0 } as Partial<T>)}
+                  aria-label={`${title}-Betrag`}
+                  className="w-full rounded-md border border-transparent bg-transparent px-2 py-1 text-right text-sm font-semibold tabular-nums outline-none focus:border-neutral-300 focus:bg-white"
+                />
+              </td>
+              <td className="px-4 py-2.5 w-16 text-right">
+                <button
+                  type="button"
+                  onClick={() => remove(row.id)}
+                  className="rounded-md p-1.5 text-neutral-300 transition-colors hover:bg-neutral-100 hover:text-neutral-600"
+                  aria-label={`${title}-Zeile entfernen`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </td>
+            </tr>
+          ))}
+          <tr className="border-t border-neutral-200 bg-neutral-50">
+            <td className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-neutral-500">{sumLabel}</td>
+            <td className="px-4 py-2.5 text-right text-sm font-bold tabular-nums">{eur(total)}</td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="flex w-full items-center gap-2 border-t border-neutral-100 px-4 py-2.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-50 hover:text-neutral-700"
+      >
+        <Plus className="h-4 w-4" /> {addLabel}
+      </button>
+    </div>
+  );
+}
+
+function RevenueBreakdown({
+  revenue,
+  purchaseTotal,
+  shippingTotal,
+  cost,
+  profit,
+  margin,
+  pendingSales,
+  assignedRevenueTotal,
+  unassignedRevenueTotal,
+  assignedPurchaseTotal,
+  unassignedPurchaseTotal,
+}: {
+  revenue: number;
+  purchaseTotal: number;
+  shippingTotal: number;
+  cost: number;
+  profit: number;
+  margin: number;
+  pendingSales: number;
+  assignedRevenueTotal: number;
+  unassignedRevenueTotal: number;
+  assignedPurchaseTotal: number;
+  unassignedPurchaseTotal: number;
+}) {
+  const isPositive = profit >= 0;
+  return (
+    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-neutral-200 px-5 py-4">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400">Gesamt-Verkauf</p>
+          <h3 className="mt-0.5 text-2xl font-bold tabular-nums text-neutral-900 sm:text-3xl">{eur(revenue)}</h3>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${isPositive ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}
+          >
+            {isPositive ? "Gewinn" : "Verlust"} {eur(Math.abs(profit))} · {margin.toFixed(1)} % Marge
+          </span>
+          {pendingSales > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-100 px-2.5 py-1 text-xs font-medium text-neutral-600">
+              {pendingSales} Verkäufe noch nicht in Umsätze übernommen
+            </span>
+          )}
+        </div>
+      </div>
+      <table className="w-full text-left text-sm">
+        <tbody>
+          <BreakdownRow label="Summe Umsätze (Brutto)" value={revenue} accent="positive" />
+          <BreakdownRow label="− Summe Ankäufe" value={-purchaseTotal} accent="negative" />
+          <BreakdownRow label="− Summe Versand" value={-shippingTotal} accent="negative" />
+          <tr className="border-t border-neutral-200 bg-neutral-50">
+            <td className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-neutral-500">= Gesamt-Verkauf (nach Kosten)</td>
+            <td className={`px-5 py-3 text-right text-base font-bold tabular-nums ${isPositive ? "text-emerald-700" : "text-rose-700"}`}>
+              {eur(profit)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="grid grid-cols-1 gap-px border-t border-neutral-200 bg-neutral-200 sm:grid-cols-2">
+        <CoverageCell label="Zugeordnete Umsätze" value={assignedRevenueTotal} ratio={revenue > 0 ? assignedRevenueTotal / revenue : 0} />
+        <CoverageCell label="Zugeordnete Ankäufe" value={assignedPurchaseTotal} ratio={purchaseTotal > 0 ? assignedPurchaseTotal / purchaseTotal : 0} />
+      </div>
+      {(unassignedRevenueTotal > 0 || unassignedPurchaseTotal > 0) && (
+        <p className="border-t border-neutral-100 bg-white px-5 py-3 text-xs text-neutral-500">
+          Hinweis: <strong className="font-semibold tabular-nums">{eur(unassignedRevenueTotal)}</strong> Umsätze und <strong className="font-semibold tabular-nums">{eur(unassignedPurchaseTotal)}</strong> Ankäufe sind noch keinem Einkauf-Batch zugeordnet.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function BreakdownRow({ label, value, accent }: { label: string; value: number; accent: "positive" | "negative" }) {
+  return (
+    <tr className="border-b border-neutral-100 last:border-0">
+      <td className="px-5 py-2.5 text-sm text-neutral-700">{label}</td>
+      <td className={`px-5 py-2.5 text-right text-sm font-semibold tabular-nums ${accent === "positive" ? "text-emerald-700" : "text-neutral-700"}`}>
+        {value === 0 ? "0,00 €" : `${value < 0 ? "−" : ""}${eur(Math.abs(value))}`}
+      </td>
+    </tr>
+  );
+}
+
+function CoverageCell({ label, value, ratio, accent = "neutral" }: { label: string; value: number; ratio: number; accent?: "neutral" | "positive" | "negative" }) {
+  const pct = Math.round(Math.min(Math.max(ratio, 0), 1) * 100);
+  const valueColor = accent === "positive" ? "text-emerald-700" : accent === "negative" ? "text-rose-700" : "text-neutral-900";
+  return (
+    <div className="bg-white px-5 py-3">
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-400">{label}</span>
+        <span className={`text-sm font-bold tabular-nums ${valueColor}`}>{eur(value)}</span>
+      </div>
+      <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100">
+        <div className="h-full rounded-full bg-neutral-900" style={{ width: `${pct}%` }} />
+      </div>
+      <p className="mt-1 text-[11px] text-neutral-500">{pct} % zugeordnet</p>
     </div>
   );
 }
@@ -1084,16 +1221,6 @@ function BatchSelector<T extends { id: number }>({
           <option key={option.id} value={option.id}>{labelOf(option)}</option>
         ))}
       </select>
-    </div>
-  );
-}
-
-function RevenueSummary({ label, value, accent, delta }: { label: string; value: string; accent: "neutral" | "positive"; delta?: string }) {
-  return (
-    <div className={`rounded-lg border p-4 ${accent === "positive" ? "border-emerald-200 bg-emerald-50/40" : "border-neutral-200 bg-white"}`}>
-      <p className="text-xs font-semibold uppercase tracking-wide text-neutral-500">{label}</p>
-      <p className={`mt-1.5 text-2xl font-bold tabular-nums ${accent === "positive" ? "text-emerald-700" : "text-neutral-900"}`}>{value}</p>
-      {delta && <p className="mt-1 text-xs text-neutral-500">{delta}</p>}
     </div>
   );
 }
