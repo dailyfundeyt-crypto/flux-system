@@ -1,33 +1,30 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
   Check,
   Database,
   ExternalLink,
+  Eye,
+  EyeOff,
+  Link2,
   LogOut,
   Moon,
   Settings as SettingsIcon,
   Sun,
-  Trash2,
   User as UserIcon,
   X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import {
-  clearCredentials,
-  loadCredentials,
-  saveCredentials,
-  testConnection,
-} from "@/lib/supabase/client";
-import type { SupabaseCredentials, SyncStatus } from "@/lib/supabase/types";
+import { useAuth } from "@/lib/supabase/auth";
+import { updateProfile } from "@/lib/supabase/snapshot";
+import type { SyncStatus } from "@/lib/supabase/types";
+import { AvatarUploader } from "@/components/auth/avatar-uploader";
 
 type SettingsPanelProps = {
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
   status: SyncStatus;
-  onSaved: (creds: SupabaseCredentials) => void;
-  onCleared: () => void;
   lastSavedAt: number | null;
 };
 
@@ -35,12 +32,8 @@ type View = "menu" | "account" | "appearance" | "connections";
 
 type Theme = "light" | "dark" | "system";
 
-const user = {
-  name: "flux_system",
-  email: "hallo@flux-system.app",
-};
-
-export function SettingsPanel({ open, onOpen, onClose, status, onSaved, onCleared, lastSavedAt }: SettingsPanelProps) {
+export function SettingsPanel({ open, onOpen, onClose, status, lastSavedAt }: SettingsPanelProps) {
+  const auth = useAuth();
   const [view, setView] = useState<View>("menu");
   const [theme, setTheme] = useState<Theme>("system");
 
@@ -50,7 +43,8 @@ export function SettingsPanel({ open, onOpen, onClose, status, onSaved, onCleare
 
   useEffect(() => {
     if (open) {
-      const initial = typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
+      const initial =
+        typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light";
       setTheme(initial as Theme);
     }
   }, [open]);
@@ -74,6 +68,9 @@ export function SettingsPanel({ open, onOpen, onClose, status, onSaved, onCleare
       const prefersDark = window.matchMedia?.("(prefers-color-scheme: dark)").matches;
       root.classList.toggle("dark", prefersDark);
     }
+    if (auth.client && auth.status.kind === "signed_in") {
+      void updateProfile(auth.client, auth.status.user.id, { theme: next }).catch(() => {});
+    }
   };
 
   const goBack = () => setView("menu");
@@ -96,24 +93,14 @@ export function SettingsPanel({ open, onOpen, onClose, status, onSaved, onCleare
           role="dialog"
           aria-modal="true"
           aria-label="Einstellungen"
-          className="flex w-[260px] flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white text-neutral-900 shadow-xl ring-1 ring-black/5"
+          className="flex w-[280px] flex-col overflow-hidden rounded-lg border border-neutral-200 bg-white text-neutral-900 shadow-xl ring-1 ring-black/5"
         >
           <Header title={view === "menu" ? "Einstellungen" : titleFor(view)} showBack={view !== "menu"} onBack={goBack} onClose={onClose} />
 
-          {view === "menu" && (
-            <SettingsMenu
-              onNavigate={setView}
-              user={user}
-              onClose={onClose}
-              status={status}
-              lastSavedAt={lastSavedAt}
-            />
-          )}
-          {view === "account" && <AccountView user={user} />}
+          {view === "menu" && <SettingsMenu onNavigate={setView} onSignOut={() => void auth.signOut()} status={status} lastSavedAt={lastSavedAt} />}
+          {view === "account" && <AccountView />}
           {view === "appearance" && <AppearanceView theme={theme} onThemeChange={applyTheme} />}
-          {view === "connections" && (
-            <ConnectionsView onSaved={onSaved} onCleared={onCleared} />
-          )}
+          {view === "connections" && <ConnectionsView />}
         </div>
       )}
     </div>
@@ -124,7 +111,7 @@ function titleFor(view: Exclude<View, "menu">) {
   switch (view) {
     case "account": return "Konto";
     case "appearance": return "Theme";
-    case "connections": return "Verbindungen";
+    case "connections": return "Verbindung";
   }
 }
 
@@ -158,36 +145,50 @@ function Header({ title, showBack, onBack, onClose }: { title: string; showBack:
 
 function SettingsMenu({
   onNavigate,
-  user,
-  onClose,
+  onSignOut,
   status,
   lastSavedAt,
 }: {
   onNavigate: (view: View) => void;
-  user: { name: string; email: string };
-  onClose: () => void;
+  onSignOut: () => void;
   status: SyncStatus;
   lastSavedAt: number | null;
 }) {
-  const initials = user.name.slice(0, 2).toUpperCase();
+  const auth = useAuth();
+  const profile = auth.status.kind === "signed_in" ? auth.status.profile : null;
+  const user = auth.status.kind === "signed_in" ? auth.status.user : null;
+  const meta = (user?.user_metadata ?? {}) as { full_name?: string; name?: string; avatar_url?: string };
+  const displayName = profile?.display_name ?? meta.full_name ?? user?.email ?? "Gast";
+  const initials = displayName.slice(0, 2).toUpperCase();
+  const avatarUrl = profile?.avatar_url ?? meta.avatar_url ?? null;
+  const signedIn = auth.status.kind === "signed_in";
+
   return (
     <>
       <div className="flex items-center gap-2 px-3 py-2.5">
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-gradient-to-br from-indigo-500 to-violet-600 text-[10px] font-semibold text-white">
-          {initials}
-        </span>
+        {avatarUrl ? (
+          <img src={avatarUrl} alt="" className="h-7 w-7 shrink-0 rounded-full object-cover" />
+        ) : (
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-[10px] font-semibold text-white">
+            {initials}
+          </span>
+        )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-xs font-semibold text-neutral-900">{user.name}</p>
-          <p className="truncate text-[10px] text-neutral-500">{user.email}</p>
+          <p className="truncate text-xs font-semibold text-neutral-900">{displayName}</p>
+          <p className="truncate text-[10px] text-neutral-500">{user?.email ?? "Nicht angemeldet"}</p>
         </div>
         <StatusDot status={status} lastSavedAt={lastSavedAt} />
       </div>
 
       <div className="grid gap-0.5 px-1 pb-2">
-        <Item icon={<UserIcon className="h-3.5 w-3.5" />} label="Konto" onClick={() => onNavigate("account")} />
+        <Item icon={<UserIcon className="h-3.5 w-3.5" />} label="Konto" disabled={!signedIn} onClick={() => onNavigate("account")} />
         <Item icon={<Moon className="h-3.5 w-3.5" />} label="Theme" onClick={() => onNavigate("appearance")} />
-        <Item icon={<Database className="h-3.5 w-3.5" />} label="Verbindungen" onClick={() => onNavigate("connections")} />
-        <Item icon={<LogOut className="h-3.5 w-3.5" />} label="Abmelden" danger onClick={onClose} />
+        <Item icon={<Database className="h-3.5 w-3.5" />} label="Verbindung" onClick={() => onNavigate("connections")} />
+        {signedIn ? (
+          <Item icon={<LogOut className="h-3.5 w-3.5" />} label="Abmelden" danger onClick={onSignOut} />
+        ) : (
+          <Item icon={<Link2 className="h-3.5 w-3.5" />} label="Anmelden" onClick={() => onNavigate("connections")} />
+        )}
       </div>
     </>
   );
@@ -207,41 +208,90 @@ function StatusDot({ status, lastSavedAt }: { status: SyncStatus; lastSavedAt: n
   return <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-neutral-300" title="Nicht verbunden" />;
 }
 
-type ItemProps = { icon: ReactNode; label: string; onClick?: () => void; danger?: boolean };
-function Item({ icon, label, onClick, danger }: ItemProps) {
+type ItemProps = { icon: ReactNode; label: string; onClick?: () => void; danger?: boolean; disabled?: boolean };
+function Item({ icon, label, onClick, danger, disabled }: ItemProps) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`group flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors ${
         danger ? "text-rose-600 hover:bg-rose-50" : "text-neutral-700 hover:bg-neutral-100"
-      }`}
+      } disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent`}
     >
-      <span className={`grid h-5 w-5 shrink-0 place-items-center ${danger ? "text-rose-500" : "text-neutral-500 group-hover:text-neutral-700"}`}>
-        {icon}
-      </span>
+      <span className={`grid h-5 w-5 shrink-0 place-items-center ${danger ? "text-rose-500" : "text-neutral-500 group-hover:text-neutral-700"}`}>{icon}</span>
       <span className="flex-1 truncate">{label}</span>
     </button>
   );
 }
 
-function AccountView({ user }: { user: { name: string; email: string } }) {
-  const initials = user.name.slice(0, 2).toUpperCase();
+function AccountView() {
+  const auth = useAuth();
+  const [name, setName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const userId = auth.status.kind === "signed_in" ? auth.status.user.id : null;
+
+  useEffect(() => {
+    if (auth.status.kind === "signed_in") {
+      const meta = (auth.status.user.user_metadata ?? {}) as { full_name?: string };
+      setName(auth.status.profile?.display_name ?? meta.full_name ?? "");
+    }
+  }, [auth.status]);
+
+  const handleSave = async () => {
+    if (!auth.client || !userId) return;
+    setSaving(true);
+    setSaved(false);
+    try {
+      await updateProfile(auth.client, userId, { display_name: name.trim() || null });
+      await auth.refreshProfile();
+      setSaved(true);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAvatarUploaded = async (url: string) => {
+    if (!auth.client || !userId) return;
+    try {
+      await updateProfile(auth.client, userId, { avatar_url: url || null });
+      await auth.refreshProfile();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  if (auth.status.kind !== "signed_in") {
+    return <p className="px-3 py-4 text-xs text-neutral-500">Bitte zuerst anmelden.</p>;
+  }
+
   return (
     <div className="space-y-3 px-3 py-3">
-      <div className="flex flex-col items-center gap-2 rounded-md border border-neutral-200 bg-white p-3">
-        <span className="grid h-10 w-10 place-items-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-xs font-semibold text-white">
-          {initials}
-        </span>
-        <p className="text-xs font-semibold text-neutral-900">{user.name}</p>
-        <p className="text-[10px] text-neutral-500">{user.email}</p>
-      </div>
-      <FormRow label="E-Mail">
-        <Input value={user.email} readOnly />
+      <AvatarUploader auth={auth} onUploaded={handleAvatarUploaded} />
+
+      <FormRow label="Anzeigename">
+        <Input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          placeholder="Wie sollen wir dich nennen?"
+          maxLength={60}
+        />
       </FormRow>
-      <FormRow label="Passwort">
-        <Input type="password" value="••••••••" readOnly />
-      </FormRow>
+
+      <button
+        type="button"
+        onClick={() => void handleSave()}
+        disabled={saving}
+        className="flex w-full items-center justify-center gap-1.5 rounded bg-neutral-900 px-2 py-1.5 text-[11px] font-medium text-white transition-colors hover:bg-neutral-700 disabled:opacity-50"
+      >
+        {saved ? <Check className="h-3 w-3" /> : null}
+        {saved ? "Gespeichert" : saving ? "Speichern …" : "Profil speichern"}
+      </button>
+
+      <p className="text-[10px] text-neutral-500">E-Mail: {auth.status.user.email}</p>
     </div>
   );
 }
@@ -282,76 +332,58 @@ function FormRow({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function ConnectionsView({
-  onSaved,
-  onCleared,
-}: {
-  onSaved: (creds: SupabaseCredentials) => void;
-  onCleared: () => void;
-}) {
-  const [url, setUrl] = useState("");
-  const [anonKey, setAnonKey] = useState("");
+function ConnectionsView() {
+  const auth = useAuth();
+  const [url, setUrl] = useState(auth.credentials?.url ?? "");
+  const [anonKey, setAnonKey] = useState(auth.credentials?.anonKey ?? "");
+  const [showKey, setShowKey] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState("");
-  const [testOk, setTestOk] = useState<boolean | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [test, setTest] = useState<{ ok: boolean; msg: string } | null>(null);
+  const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const stored = loadCredentials();
-    if (stored) {
-      setUrl(stored.url);
-      setAnonKey(stored.anonKey);
-    }
-    setTestResult("");
-    setTestOk(null);
-  }, []);
+    setUrl(auth.credentials?.url ?? "");
+    setAnonKey(auth.credentials?.anonKey ?? "");
+  }, [auth.credentials?.url, auth.credentials?.anonKey]);
 
-  const trimmedUrl = url.trim();
-  const trimmedKey = anonKey.trim();
-  const canSave = trimmedUrl.startsWith("https://") && trimmedKey.length > 20;
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    debounceRef.current = window.setTimeout(() => {
+      if (url.trim() && anonKey.trim()) {
+        auth.saveCredentials({ url: url.trim(), anonKey: anonKey.trim() });
+      }
+    }, 600);
+    return () => {
+      if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    };
+  }, [url, anonKey]);
 
   const handleTest = async () => {
-    if (!canSave) return;
+    if (!url.trim() || !anonKey.trim()) return;
     setTesting(true);
-    setTestResult("");
-    setTestOk(null);
+    setTest(null);
     try {
-      const message = await testConnection({ url: trimmedUrl, anonKey: trimmedKey, autoSync: true });
-      setTestResult(message);
-      setTestOk(!message.startsWith("Fehler"));
+      const { createClient } = await import("@supabase/supabase-js");
+      const client = createClient(url.trim(), anonKey.trim(), { auth: { persistSession: false } });
+      const { error } = await client.from("profiles").select("id").limit(1).maybeSingle();
+      if (error && error.code !== "PGRST116") throw error;
+      setTest({ ok: true, msg: "Verbindung erfolgreich." });
     } catch (err) {
-      setTestResult(err instanceof Error ? err.message : "Unbekannter Fehler");
-      setTestOk(false);
+      setTest({ ok: false, msg: err instanceof Error ? err.message : "Unbekannter Fehler" });
     } finally {
       setTesting(false);
     }
   };
 
-  const handleSave = async () => {
-    if (!canSave) return;
-    setSaving(true);
-    try {
-      const creds: SupabaseCredentials = { url: trimmedUrl, anonKey: trimmedKey, autoSync: true };
-      saveCredentials(creds);
-      onSaved(creds);
-      setTestResult("Verbindung gespeichert.");
-      setTestOk(true);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDisconnect = () => {
-    clearCredentials();
-    setUrl("");
-    setAnonKey("");
-    setTestResult("");
-    setTestOk(null);
-    onCleared();
-  };
-
   return (
     <div className="space-y-2 px-3 py-3">
+      <p className="text-[10px] text-neutral-500">
+        Trage deine Supabase-Projekt-URL und den anon-Key ein. Beides findest du unter
+        <a href="https://supabase.com/dashboard/project/_/settings/api" target="_blank" rel="noreferrer" className="ml-0.5 inline-flex items-center gap-0.5 font-medium text-neutral-700 hover:text-neutral-900">
+          Project Settings → API <ExternalLink className="h-2.5 w-2.5" />
+        </a>
+      </p>
+
       <FormRow label="Projekt-URL">
         <Input
           value={url}
@@ -360,58 +392,67 @@ function ConnectionsView({
           autoComplete="off"
         />
       </FormRow>
-      <FormRow label="Anon-Key">
-        <Input
-          value={anonKey}
-          onChange={(event) => setAnonKey(event.target.value)}
-          placeholder="eyJhbGciOi…"
-          type="password"
-          autoComplete="off"
-        />
+      <FormRow label="anon key">
+        <div className="relative">
+          <Input
+            value={anonKey}
+            onChange={(event) => setAnonKey(event.target.value)}
+            placeholder="eyJhbGciOi…"
+            type={showKey ? "text" : "password"}
+            autoComplete="off"
+          />
+          <button
+            type="button"
+            onClick={() => setShowKey((value) => !value)}
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded p-1 text-neutral-400 hover:text-neutral-700"
+            aria-label={showKey ? "Verbergen" : "Anzeigen"}
+          >
+            {showKey ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+          </button>
+        </div>
       </FormRow>
-      <div className="flex flex-wrap gap-1">
-        <button
-          type="button"
-          onClick={handleTest}
-          disabled={!canSave || testing}
-          className="flex-1 rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-50"
-        >
-          {testing ? "Teste…" : "Testen"}
-        </button>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={!canSave || saving}
-          className="flex-1 rounded bg-neutral-900 px-2 py-1 text-[11px] font-medium text-white transition-colors hover:bg-neutral-700 disabled:opacity-50"
-        >
-          {saving ? "…" : "Speichern"}
-        </button>
-        <button
-          type="button"
-          onClick={handleDisconnect}
-          disabled={!url && !anonKey}
-          className="rounded px-2 py-1 text-[11px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-800 disabled:opacity-40"
-          aria-label="Trennen"
-        >
-          <Trash2 className="h-3 w-3" />
-        </button>
-      </div>
-      {testResult && (
-        <p
-          className={`rounded px-2 py-1.5 text-[10px] ${testOk ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}
-          role="status"
-        >
-          {testResult}
-        </p>
-      )}
-      <a
-        href="https://supabase.com/dashboard"
-        target="_blank"
-        rel="noreferrer"
-        className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-neutral-500 hover:text-neutral-800"
+
+      <button
+        type="button"
+        onClick={handleTest}
+        disabled={testing || !url.trim() || !anonKey.trim()}
+        className="w-full rounded border border-neutral-200 bg-white px-2 py-1 text-[11px] font-medium text-neutral-700 transition-colors hover:bg-neutral-50 disabled:opacity-50"
       >
-        Supabase Dashboard <ExternalLink className="h-2.5 w-2.5" />
-      </a>
+        {testing ? "Teste …" : "Verbindung testen"}
+      </button>
+
+      {test && (
+        <p className={`text-[10px] font-medium ${test.ok ? "text-emerald-600" : "text-rose-600"}`}>{test.msg}</p>
+      )}
+
+      <div className="border-t border-neutral-100 pt-2">
+        <GoogleSignInButton />
+      </div>
     </div>
+  );
+}
+
+function GoogleSignInButton() {
+  const auth = useAuth();
+  return (
+    <button
+      type="button"
+      onClick={() => void auth.signInWithGoogle()}
+      disabled={!auth.credentials}
+      className="flex w-full items-center justify-center gap-2 rounded-md border border-neutral-200 bg-white px-3 py-1.5 text-[11px] font-medium text-neutral-800 transition-colors hover:bg-neutral-50 disabled:opacity-40"
+    >
+      <GoogleIcon /> Mit Google anmelden
+    </button>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" aria-hidden="true">
+      <path fill="#4285F4" d="M23.05 12.27c0-.79-.07-1.55-.2-2.27H12v4.3h6.2a5.31 5.31 0 0 1-2.3 3.48v2.9h3.72c2.18-2 3.43-4.96 3.43-8.41Z" />
+      <path fill="#34A853" d="M12 23.5c3.11 0 5.71-1.03 7.62-2.8l-3.72-2.9c-1.03.7-2.36 1.1-3.9 1.1-3 0-5.54-2.03-6.45-4.75H1.66v2.97A11.5 11.5 0 0 0 12 23.5Z" />
+      <path fill="#FBBC05" d="M5.55 14.15a6.9 6.9 0 0 1 0-4.3V6.88H1.66a11.5 11.5 0 0 0 0 10.24l3.89-2.97Z" />
+      <path fill="#EA4335" d="M12 4.75c1.69 0 3.21.58 4.4 1.72l3.3-3.3A11.5 11.5 0 0 0 12 .5 11.5 11.5 0 0 0 1.66 6.88l3.89 2.97C6.46 6.78 9 4.75 12 4.75Z" />
+    </svg>
   );
 }

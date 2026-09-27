@@ -21,9 +21,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SettingsPanel } from "@/components/settings/settings-panel";
-import { buildClient, loadCredentials } from "@/lib/supabase/client";
-import { loadSnapshot, saveSnapshot } from "@/lib/supabase/snapshot";
-import type { SupabaseCredentials, SyncStatus, WorkspaceSnapshot } from "@/lib/supabase/types";
+import { AuthScreen } from "@/components/auth/auth-screen";
+import { useAuth } from "@/lib/supabase/auth";
+import {
+  loadSnapshot,
+  saveSnapshot,
+  type DeliveryRow,
+  type Purchase,
+  type PurchaseBatch,
+  type PurchaseLine,
+  type RevenueLine,
+  type Sale,
+  type ShippingLine,
+} from "@/lib/supabase/snapshot";
+import type { SyncStatus } from "@/lib/supabase/types";
 import logoAsset from "@/assets/flux-logo.png.asset.json";
 
 export const Route = createFileRoute("/")({
@@ -44,118 +55,87 @@ const sections = ["Ankauf", "Verkauf", "Lieferung", "Umsatz"] as const;
 type Section = (typeof sections)[number];
 type Entry = { name: string; detail: string; amount: string; time: string };
 
-const initialPurchases: Entry[] = [
-  { name: "Nordwerk GmbH", detail: "24 × Aluminiumprofil", amount: "1.824,00 €", time: "Heute, 09:42" },
-  { name: "Meyer Großhandel", detail: "60 × Verpackungseinheit", amount: "846,00 €", time: "Gestern, 16:18" },
-  { name: "Kern & Sohn", detail: "12 × Werkzeugset Pro", amount: "1.140,00 €", time: "25. Sep., 11:05" },
-];
-
-const initialSales: Entry[] = [
-  { name: "Atelier Hansen", detail: "8 × Werkzeugset Pro", amount: "1.272,00 €", time: "Heute, 11:24" },
-  { name: "Bauprojekt West", detail: "18 × Aluminiumprofil", amount: "2.322,00 €", time: "Heute, 08:10" },
-  { name: "Formwerk Studio", detail: "32 × Verpackungseinheit", amount: "768,00 €", time: "Gestern, 14:47" },
-];
-
-type MoneyLine = { id: number; label: string; amount: number };
-type RevenueLine = { id: number; store: string; amount: number };
-type PurchaseBatch = { id: number; label: string; purchaseIds: number[]; revenueIds: number[] };
-
-const initialRevenue: RevenueLine[] = [
-  { id: 1, store: "Atelier Hansen", amount: 1272 },
-  { id: 2, store: "Bauprojekt West", amount: 2322 },
-  { id: 3, store: "Formwerk Studio", amount: 768 },
-  { id: 4, store: "Nordwerk Online", amount: 1840 },
-  { id: 5, store: "Studio Lindqvist", amount: 945 },
-  { id: 6, store: "Werkraum Süd", amount: 612 },
-];
-
-const initialPurchaseLines: MoneyLine[] = [
-  { id: 1, label: "Nordwerk GmbH", amount: 1824 },
-  { id: 2, label: "Meyer Großhandel", amount: 846 },
-  { id: 3, label: "Kern & Sohn", amount: 1140 },
-];
-
-const initialShippingLines: MoneyLine[] = [
-  { id: 1, label: "DHL Express", amount: 48.9 },
-  { id: 2, label: "Hermes Sperrgut", amount: 32.5 },
-  { id: 3, label: "DPD Paletten", amount: 89.0 },
-];
-
-const initialPurchaseBatches: PurchaseBatch[] = [
-  { id: 1, label: "Einkauf 1", purchaseIds: [1], revenueIds: [1, 4] },
-  { id: 2, label: "Einkauf 2", purchaseIds: [2], revenueIds: [2, 6] },
-  { id: 3, label: "Einkauf 3", purchaseIds: [3], revenueIds: [3, 5] },
-];
-
-const initialDeliveryRows: DeliveryRow[] = [
-  { id: 1, box: "1", qr: null, invoice: null },
-  { id: 2, box: "2", qr: null, invoice: null },
-];
-
 function Index() {
+  const auth = useAuth();
   const [active, setActive] = useState(0);
-  const [purchases, setPurchases] = useState(initialPurchases);
-  const [sales, setSales] = useState(initialSales);
-  const [revenue, setRevenue] = useState(initialRevenue);
-  const [purchaseLines, setPurchaseLines] = useState(initialPurchaseLines);
-  const [shippingLines, setShippingLines] = useState(initialShippingLines);
-  const [purchaseBatches, setPurchaseBatches] = useState(initialPurchaseBatches);
-  const [deliveryRows, setDeliveryRows] = useState(initialDeliveryRows);
+  const [purchases, setPurchases] = useState<Purchase[]>([]);
+  const [sales, setSales] = useState<Sale[]>([]);
+  const [revenue, setRevenue] = useState<RevenueLine[]>([]);
+  const [purchaseLines, setPurchaseLines] = useState<PurchaseLine[]>([]);
+  const [shippingLines, setShippingLines] = useState<ShippingLine[]>([]);
+  const [purchaseBatches, setPurchaseBatches] = useState<PurchaseBatch[]>([]);
+  const [deliveryRows, setDeliveryRows] = useState<DeliveryRow[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>({ kind: "idle" });
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
-  const [supabaseCreds, setSupabaseCreds] = useState<SupabaseCredentials | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
-  const hydratedRef = useRef(false);
+  const prevUserId = useRef<string | null>(null);
 
-  // Initial Supabase hydration + connection (only once on mount)
+  // Hydrate from Supabase whenever a user signs in (per-user scope)
   useEffect(() => {
-    const creds = loadCredentials();
-    if (!creds) return;
-    setSupabaseCreds(creds);
+    if (!auth.client || auth.status.kind !== "signed_in") {
+      setHydrated(false);
+      return;
+    }
+    const userId = auth.status.user.id;
+    if (prevUserId.current === userId) return;
+    prevUserId.current = userId;
+    setHydrated(false);
     setSyncStatus({ kind: "loading" });
-    const client = buildClient(creds);
     void (async () => {
       try {
-        const snapshot = await loadSnapshot(client);
-        if (snapshot) {
-          setPurchases(snapshot.purchases);
-          setSales(snapshot.sales);
-          setRevenue(snapshot.revenue);
-          setPurchaseLines(snapshot.purchaseLines);
-          setShippingLines(snapshot.shippingLines);
-          setPurchaseBatches(snapshot.purchaseBatches);
-          if (snapshot.deliveryRows.length > 0) setDeliveryRows(snapshot.deliveryRows);
-        }
+        const snapshot = await loadSnapshot(auth.client!, userId);
+        setPurchases(snapshot.purchases);
+        setSales(snapshot.sales);
+        setRevenue(snapshot.revenueLines);
+        setPurchaseLines(snapshot.purchaseLines);
+        setShippingLines(snapshot.shippingLines);
+        setPurchaseBatches(snapshot.purchaseBatches);
+        setDeliveryRows(snapshot.deliveryRows);
         setSyncStatus({ kind: "ready", at: Date.now() });
       } catch (err) {
         setSyncStatus({ kind: "error", message: err instanceof Error ? err.message : "Unbekannter Fehler" });
       } finally {
-        hydratedRef.current = true;
+        setHydrated(true);
       }
     })();
-  }, []);
+  }, [auth.client, auth.status]);
 
-  // Debounced auto-sync on state changes
+  // Sign-out: reset to empty so local UI doesn't bleed across users
   useEffect(() => {
-    if (!hydratedRef.current) return;
-    if (!supabaseCreds) return;
-    if (!supabaseCreds.autoSync) return;
+    if (auth.status.kind === "signed_out") {
+      setPurchases([]);
+      setSales([]);
+      setRevenue([]);
+      setPurchaseLines([]);
+      setShippingLines([]);
+      setPurchaseBatches([]);
+      setDeliveryRows([]);
+      setHydrated(false);
+      prevUserId.current = null;
+      setSyncStatus({ kind: "idle" });
+      setLastSavedAt(null);
+    }
+  }, [auth.status]);
+
+  // Auto-sync on any state change after hydration
+  useEffect(() => {
+    if (!auth.client || auth.status.kind !== "signed_in") return;
+    if (!hydrated) return;
+    const userId = auth.status.user.id;
     setSyncStatus({ kind: "loading" });
     const timer = window.setTimeout(() => {
-      const snapshot: WorkspaceSnapshot = {
-        schemaVersion: 1,
+      void saveSnapshot(auth.client!, userId, {
         purchases,
         sales,
-        revenue,
         purchaseLines,
         shippingLines,
+        revenueLines: revenue,
         purchaseBatches,
         deliveryRows,
-      };
-      const client = buildClient(supabaseCreds);
-      void saveSnapshot(client, snapshot)
+      })
         .then(() => {
           const at = Date.now();
           setLastSavedAt(at);
@@ -166,16 +146,7 @@ function Index() {
         });
     }, 800);
     return () => window.clearTimeout(timer);
-  }, [
-    purchases,
-    sales,
-    revenue,
-    purchaseLines,
-    shippingLines,
-    purchaseBatches,
-    deliveryRows,
-    supabaseCreds,
-  ]);
+  }, [purchases, sales, purchaseLines, shippingLines, revenue, purchaseBatches, deliveryRows, auth.client, auth.status, hydrated]);
 
   const goTo = (index: number) => {
     setActive(index);
@@ -239,17 +210,12 @@ function Index() {
         onOpen={() => setSettingsOpen(true)}
         onClose={() => setSettingsOpen(false)}
         status={syncStatus}
-        onSaved={(creds) => {
-          setSupabaseCreds(creds);
-          setSyncStatus({ kind: "ready", at: Date.now() });
-        }}
-        onCleared={() => {
-          setSupabaseCreds(null);
-          setSyncStatus({ kind: "idle" });
-          setLastSavedAt(null);
-        }}
         lastSavedAt={lastSavedAt}
       />
+
+      {auth.status.kind === "signed_out" && auth.credentials && !auth.error && (
+        <AuthScreen auth={auth} />
+      )}
 
       <div ref={scroller} onScroll={onScroll} className="flex snap-x snap-mandatory overflow-x-auto scroll-smooth [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <Page title="Ankauf" kicker="Beschaffung" subtitle="Einkäufe erfassen und Lieferanten im Blick behalten.">
@@ -381,7 +347,6 @@ function TradeForm({ mode, onAdd }: { mode: "Ankauf" | "Verkauf"; onAdd: (entry:
 }
 
 type DeliveryFile = { dataUrl: string; name: string; kind: "image" | "pdf" };
-type DeliveryRow = { id: number; box: string; qr: DeliveryFile | null; invoice: DeliveryFile | null };
 
 function readFile(file: File): Promise<DeliveryFile> {
   return new Promise((resolve, reject) => {
@@ -719,10 +684,10 @@ function RevenueWorkspace({
   batches,
   onBatchesChange,
 }: {
-  purchaseLines: MoneyLine[];
-  onPurchaseLinesChange: (rows: MoneyLine[]) => void;
-  shippingLines: MoneyLine[];
-  onShippingLinesChange: (rows: MoneyLine[]) => void;
+  purchaseLines: PurchaseLine[];
+  onPurchaseLinesChange: (rows: PurchaseLine[]) => void;
+  shippingLines: ShippingLine[];
+  onShippingLinesChange: (rows: ShippingLine[]) => void;
   revenue: RevenueLine[];
   onRevenueChange: (rows: RevenueLine[]) => void;
   sales: Entry[];
@@ -767,12 +732,12 @@ function RevenueWorkspace({
     switch (row.kind) {
       case "purchase":
         onPurchaseLinesChange(
-          purchaseLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<MoneyLine>) } : line)),
+          purchaseLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<PurchaseLine>) } : line)),
         );
         return;
       case "shipping":
         onShippingLinesChange(
-          shippingLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<MoneyLine>) } : line)),
+          shippingLines.map((line) => (line.id === row.id ? { ...line, ...(patch as Partial<ShippingLine>) } : line)),
         );
         return;
       case "revenue":
@@ -1012,7 +977,7 @@ function BatchAssigner({
   onChange,
 }: {
   batch: Extract<RevenueRow, { kind: "batch" }>;
-  purchaseLines: MoneyLine[];
+  purchaseLines: PurchaseLine[];
   revenue: RevenueLine[];
   onChange: (patch: Partial<RevenueRow>) => void;
 }) {
