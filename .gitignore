@@ -20,6 +20,11 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Dev logs (nicht fürs Repo)
+dev.err
+*.err
+
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

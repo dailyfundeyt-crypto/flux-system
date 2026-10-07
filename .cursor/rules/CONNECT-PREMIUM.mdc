@@ -1,0 +1,176 @@
+---
+description: Connect Premium Harness – dunkles xAI/Grok-Premium-UI, deutsche UX-Texte, strenges TypeScript/React, Barrierefreiheit, getestete und fertige Features. Bei jeder UI-, Design-, Frontend- oder Feature-Arbeit anwenden.
+globs: ["**/*.tsx", "**/*.ts", "**/*.jsx", "**/*.css", "**/*.scss", "**/tailwind.config.*", "**/app/**", "**/components/**"]
+alwaysApply: true
+---
+
+# Connect Premium Harness
+
+<!--
+  alwaysApply: true  -> Regel ist in JEDEM Chat/Agent-Lauf aktiv (Standard, empfohlen für UI-Projekte).
+  alwaysApply: false -> mit "description" bleibt sie "Agent Requested": der Agent lädt sie selbst, wenn die Aufgabe passt,
+                        oder du rufst sie manuell mit @CONNECT-PREMIUM auf.
+  globs              -> greift automatisch, sobald passende Dateien im Kontext sind (nur wirksam bei alwaysApply: false).
+-->
+
+You are building a finished, expensive-looking product in the style of xAI / Grok: calm, dark, minimal, precise.
+Every change must ship complete, consistent and tested. No placeholders, no half-done screens.
+
+## 0. Working rules (always)
+
+1. **Read before you write.** Inspect existing components, tokens, routes and data models first. Reuse; don't duplicate.
+2. **Never invent APIs, env vars, endpoints, packages, props or DB columns.** If it doesn't exist in the repo or official docs, check, or ask. Say clearly "not found" instead of guessing.
+3. **Back up before risky edits.** Before migrations, mass refactors, deleting files, changing auth or rewriting config: create a git commit/branch (`git switch -c backup/<topic>`) or copy the file (`*.bak`). Never `git push --force`, `reset --hard` or drop tables without explicit user approval.
+4. **Small, focused diffs.** One concern per change. Don't reformat unrelated code.
+5. **Test what you ship.** Run typecheck, lint and tests (`tsc --noEmit`, `eslint`, `vitest`/`jest`, `playwright` if present). For UI: open the page, check desktop (1440px) and mobile (390px), dark mode, keyboard navigation. Report what you actually verified – never claim untested success.
+6. **No secrets in code or logs.** Use env vars; never print keys.
+7. **Finish the loop.** Loading, empty, error and success states exist for every async view. Every button does something or is removed.
+
+## 1. Visual language
+
+- **Dark first.** Near-black background, not pure #000 everywhere; layered surfaces with subtle elevation.
+- **Glass panels.** Translucent surfaces with backdrop blur and a 1px hairline border, used for menus, sheets, popovers, side panels. Not on every card.
+- **One accent pair:** sky (primary action, focus) + violet (AI / agent / highlight). Orange only for timers/urgency. No rainbow UIs.
+- **Typography:** Inter / Geist / system UI. Tight headings (-0.02em), 14–15px body, muted secondary text. Max 2 font weights per view (500, 600).
+- **Space over lines.** Generous padding, 8px grid, radius 12–20px for panels, 999px for pills.
+- **Icons:** one set only (lucide-react), 16–20px, stroke 1.5–1.75.
+- **No light-mode regressions.** Dark is default. Light mode exists only if the project has a toggle; then every new component must support both via tokens – never hardcode colors.
+
+### Design tokens (use or map to existing tokens)
+
+```css
+:root {
+  /* surfaces */
+  --bg: #07080a;              /* app background, near-black */
+  --bg-elev-1: #0d0f12;       /* cards */
+  --bg-elev-2: #14171c;       /* inputs, hovered rows */
+  --glass: rgba(18, 20, 24, 0.62);
+  --glass-strong: rgba(14, 16, 20, 0.82);
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-strong: rgba(255, 255, 255, 0.14);
+
+  /* text */
+  --fg: #f4f5f7;
+  --fg-muted: #9aa1ab;
+  --fg-subtle: #5f6670;
+
+  /* accents */
+  --accent: #38bdf8;          /* sky-400 – primary, focus */
+  --accent-2: #8b5cf6;        /* violet-500 – AI / agents */
+  --warn: #fb923c;            /* orange – timers */
+  --danger: #f43f5e;
+  --success: #34d399;
+
+  /* effects */
+  --radius-sm: 10px; --radius: 14px; --radius-lg: 20px;
+  --blur: 20px;
+  --shadow-panel: 0 1px 0 rgba(255,255,255,0.04) inset, 0 20px 60px -20px rgba(0,0,0,0.7);
+  --focus-ring: 0 0 0 1px rgba(56,189,248,0.9), 0 0 0 4px rgba(56,189,248,0.22), 0 0 24px rgba(56,189,248,0.25);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-fast: 120ms; --dur: 200ms; --dur-slow: 320ms;
+}
+
+.glass {
+  background: var(--glass);
+  backdrop-filter: blur(var(--blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(140%);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+}
+
+.menu { /* frosted dropdowns, context menus, command palette */
+  background: var(--glass-strong);
+  backdrop-filter: blur(var(--blur)) saturate(140%);
+  -webkit-backdrop-filter: blur(var(--blur)) saturate(140%);
+  border: 1px solid var(--hairline-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-panel);
+  padding: 6px; min-width: 220px;
+}
+.menu-item { height: 34px; padding: 0 10px; border-radius: 8px; color: var(--fg); }
+.menu-item:hover, .menu-item[data-highlighted] { background: rgba(255,255,255,0.06); }
+
+:where(button, a, input, textarea, select, [tabindex]):focus-visible {
+  outline: none; box-shadow: var(--focus-ring);
+}
+
+.btn-primary {
+  background: linear-gradient(180deg, #f4f5f7, #d9dde3); color: #07080a;
+  border-radius: 999px; height: 40px; padding: 0 18px; font-weight: 600;
+  transition: transform var(--dur-fast) var(--ease-out), opacity var(--dur) var(--ease-out);
+}
+.btn-primary:active { transform: scale(0.98); }
+.btn-ghost { background: transparent; border: 1px solid var(--hairline); color: var(--fg); border-radius: 999px; }
+
+/* subtle ambient glow behind hero / empty states – one per screen max */
+.ambient { background: radial-gradient(600px 300px at 50% -10%, rgba(139,92,246,0.18), transparent 70%),
+                      radial-gradient(500px 260px at 80% 0%, rgba(56,189,248,0.12), transparent 70%); }
+```
+
+Tailwind: put these into `tailwind.config` / `@theme` as `bg`, `elev-1`, `glass`, `hairline`, `accent`, `accent-2` and use the classes – no raw hex in components.
+
+## 2. Components & patterns
+
+- **Chat input (Grok style):** large rounded pill/rounded-2xl glass field, auto-growing textarea, attach + model/agent selector left, round send button right (disabled state visible), `Enter` = send, `Shift+Enter` = newline, streaming indicator, stop button while generating.
+- **Messages:** user message right in elev-2 bubble; assistant left, no bubble, plain readable text, markdown + code blocks with copy button.
+- **Settings:** left nav (desktop) / stacked list with back arrow (mobile). Every section opens. Rows: label + description + control right. Save is automatic with a small "Gespeichert" toast, or explicit with a sticky footer – never both.
+- **Menus & context menus:** frosted `.menu`, keyboard navigable (Radix/shadcn primitives preferred), destructive items red and last, with undo toast ("Entfernt · Rückgängig").
+- **Lists (agents, tabs, companies):** icon/favicon/avatar 32–40px, title, muted subtitle, chevron or status dot. Grouped with small uppercase muted section labels.
+- **Empty states:** icon, one sentence, one primary action. Never a blank page.
+- **Skeletons** instead of spinners for content; spinner only inside buttons.
+- **Toasts:** bottom center (mobile) / bottom right (desktop), glass, auto-dismiss 4s, errors stay until dismissed and say what to do.
+
+## 3. Signed-out experience
+
+- If the user is not authenticated, show a **landing page**, not an error or empty app: ambient glow, product name, one-line value proposition, 3 feature points max, primary button "Mit Google fortfahren", footer links Impressum · Datenschutz · Nutzungsbedingungen.
+- After login, go straight into the app at the last visited route. Logout must work on desktop and mobile and return to the landing page.
+
+## 4. Mobile (≤ 768px)
+
+- **Minimalism:** no bottom tab bar unless asked. Main sections are swiped left/right (CSS scroll-snap or a gesture lib), with small page dots as orientation.
+- Secondary navigation (company switch, account, settings) hides behind the avatar.
+- Bottom sheets (glass, drag handle, snap points) instead of modals.
+- Touch targets ≥ 44px, respect `env(safe-area-inset-*)`, no horizontal overflow, inputs ≥ 16px font (no iOS zoom).
+- Test at 390×844 and 360×740.
+
+## 5. Motion
+
+- Tasteful, fast, purposeful: 120–320ms, `--ease-out`. Fade + 4–8px translate for enter; scale 0.98 for press.
+- Use Framer Motion / CSS transitions; animate `opacity` and `transform` only.
+- No bouncing, no infinite decorative loops, no parallax gimmicks. Max one ambient effect per screen.
+- Always honor `@media (prefers-reduced-motion: reduce)` → disable transforms, keep opacity.
+
+## 6. Language & copy (Stefan's apps)
+
+- **UI text in German**, short and direct, "du"-form: "Speichern", "Abbrechen", "Einstellungen", "Abmelden", "Mit Google fortfahren", "Neuer Chat", "Unternehmen wechseln", "Gespeichert", "Etwas ist schiefgelaufen – erneut versuchen".
+- Error messages say what happened and what to do, no stack traces or HTTP codes in the main text (put them in "Details").
+- No lorem ipsum, no "TODO", no English leftovers in German UIs. Keep product names as they are (Connect, Helium, Notch).
+- Code, identifiers and commit messages in English.
+
+## 7. Accessibility
+
+- Semantic HTML first (`button`, `nav`, `main`, `dialog`), labels for every input, `aria-label` for icon-only buttons.
+- Full keyboard support: Tab order, `Esc` closes overlays, focus trap in dialogs, focus returns to trigger.
+- Contrast ≥ 4.5:1 for text (muted text on --bg must still pass for body copy).
+- Visible focus via `--focus-ring` everywhere. Never `outline: none` without replacement.
+
+## 8. TypeScript & React standards
+
+- `"strict": true`, no `any` (use `unknown` + narrowing), no `@ts-ignore` without a comment explaining why.
+- Small components (< ~150 lines); extract hooks (`useX`) for logic; one component per file for shared UI.
+- Props typed with explicit interfaces; discriminated unions for states (`{status:'loading'} | {status:'error', error} | {status:'ok', data}`).
+- Server/client boundaries respected (Next.js: `"use client"` only where needed). Data fetching via existing client/query layer (e.g. TanStack Query, server actions) – don't add a new one.
+- Validate external input (zod). Handle errors explicitly; no silent `catch {}`.
+- No new dependency without a reason stated in the reply; prefer what's already installed (shadcn/ui, Radix, Tailwind, lucide, framer-motion).
+- Delete dead code you replace. No commented-out blocks.
+
+## 9. Definition of Done
+
+Before saying "fertig", confirm:
+- [ ] Typecheck, lint, tests green (or explain what couldn't run).
+- [ ] Checked desktop + mobile, dark (+ light if toggle exists), keyboard.
+- [ ] Loading / empty / error states present.
+- [ ] All labels German, no placeholders, no dead buttons.
+- [ ] No invented APIs; no secrets committed; backup made before risky changes.
+- [ ] Short summary: what changed, what was verified, what is still open.
